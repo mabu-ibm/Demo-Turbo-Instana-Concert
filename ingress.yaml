@@ -1,0 +1,81 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: load-test-ingress
+  namespace: load-testing
+  labels:
+    app: load-test-ingress
+    component: routing
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:
+      paths:
+      # Load Test App API Routen (WICHTIG!)
+      - path: /stress
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /echo
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /stop
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /health
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /metrics
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /status
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      
+      # Echo Service direkte API
+      - path: /api/echo
+        pathType: Prefix
+        backend:
+          service:
+            name: vulnerable-echo-service
+            port:
+              number: 8085
+      
+      # Default - Load Test App
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+
+
