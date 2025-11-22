@@ -15,6 +15,7 @@ from datetime import datetime
 from flask import Flask, request, jsonify, render_template_string
 from werkzeug.serving import make_server
 import psutil
+from kubernetes import client, config  # Neu: Kubernetes-Client
 
 # Logging konfigurieren
 logging.basicConfig(
@@ -24,6 +25,11 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 app = Flask(__name__)
+
+# Pod/Cluster-Infos aus Umgebungsvariablen
+POD_NAME = os.environ.get("POD_NAME", "unknown-pod")
+POD_NAMESPACE = os.environ.get("POD_NAMESPACE", "load-testing")
+NODE_NAME = os.environ.get("NODE_NAME", "unknown-node")
 
 # Global variables für Monitoring
 current_stress_processes = []
@@ -226,6 +232,69 @@ def run_stress_ng(cpu_workers=2, memory_workers=1, duration=30, memory_size="256
         logger.error(f"Fehler beim Ausführen von stress-ng: {e}")
         metrics['stress_tests_running'] = max(0, metrics['stress_tests_running'] - 1)
         return {'success': False, 'error': str(e)}
+
+def get_cluster_stress_status():
+    """Aggregiert Stress-Tests über alle load-test-app Pods im Namespace"""
+    try:
+        # Im Cluster laufen -> ServiceAccount nutzen
+        config.load_incluster_config()
+    except Exception as e:
+        logger.error(f"Kubernetes In-Cluster Config Fehler: {e}")
+        return {'error': 'kubernetes_config_error', 'details': str(e)}
+
+    v1 = client.CoreV1Api()
+    namespace = POD_NAMESPACE or 'load-testing'
+
+    try:
+        pods = v1.list_namespaced_pod(
+            namespace=namespace,
+            label_selector="app=load-test-app"
+        )
+    except Exception as e:
+        logger.error(f"Konnte Pods nicht listen: {e}")
+        return {'error': 'list_pods_failed', 'details': str(e)}
+
+    cluster_total = 0
+    per_pod = []
+    per_node = {}
+
+    for pod in pods.items:
+        pod_ip = pod.status.pod_ip
+        pod_name = pod.metadata.name
+        node_name = pod.spec.node_name
+
+        if not pod_ip:
+            continue
+
+        try:
+            resp = requests.get(f"http://{pod_ip}:8080/status", timeout=2)
+            if resp.status_code != 200:
+                continue
+            data = resp.json()
+            active = data.get('active_stress_processes', 0)
+
+            cluster_total += active
+
+            per_pod.append({
+                'pod_name': pod_name,
+                'node_name': node_name,
+                'pod_ip': pod_ip,
+                'active_stress_processes': active
+            })
+
+            per_node[node_name] = per_node.get(node_name, 0) + active
+
+        except Exception as e:
+            logger.warning(f"Konnte Status von Pod {pod_name} ({pod_ip}) nicht lesen: {e}")
+            continue
+
+    return {
+        'cluster_total_stress_tests': cluster_total,
+        'per_pod': per_pod,
+        'per_node': per_node,
+        'namespace': namespace,
+        'timestamp': datetime.now().isoformat()
+    }
 
 # HTML Template für Web Interface
 HTML_TEMPLATE = """
@@ -430,6 +499,7 @@ HTML_TEMPLATE = """
             <h1>🔥 Load Testing Application</h1>
             <p>v2.0 - Kubernetes Load Generator für Turbonomic und Instana Testing</p>
             <p><strong>Echo Service:</strong> {{ echo_service_url }}</p>
+            <p><strong>Aktueller Pod:</strong> {{ pod_name }} auf Node {{ node_name }}</p>
         </div>
         
         <div class="metrics">
@@ -445,7 +515,7 @@ HTML_TEMPLATE = """
                 </div>
                 <div class="metric-item">
                     <div class="metric-value">{{ metrics.stress_tests_running }}</div>
-                    <div class="metric-label">Active Stress Tests</div>
+                    <div class="metric-label">Active Stress Tests (dieser Pod)</div>
                 </div>
                 <div class="metric-item">
                     <div class="metric-value">{{ metrics.echo_requests_total }}</div>
@@ -468,6 +538,56 @@ HTML_TEMPLATE = """
                     <div class="metric-label">Total Requests</div>
                 </div>
             </div>
+        </div>
+
+        <div class="form-section">
+            <h3>🌐 Clusterweite Stress-Test Übersicht</h3>
+            {% if cluster_status.error %}
+                <div class="status error">
+                    <strong>Fehler beim Lesen der Cluster-Daten:</strong>
+                    {{ cluster_status.details }}
+                </div>
+            {% else %}
+                <p><strong>Namespace:</strong> {{ cluster_status.namespace }}</p>
+                <div class="metrics-grid">
+                    <div class="metric-item">
+                        <div class="metric-value">
+                            {{ cluster_status.cluster_total_stress_tests or 0 }}
+                        </div>
+                        <div class="metric-label">Clusterweite Active Stress Tests</div>
+                    </div>
+                    <div class="metric-item">
+                        <div class="metric-value">
+                            {{ metrics.stress_tests_running }}
+                        </div>
+                        <div class="metric-label">Active Stress Tests (dieser Pod)</div>
+                    </div>
+                </div>
+
+                {% if cluster_status.per_node %}
+                    <h4 style="margin-top:20px;">Stress Tests pro Node</h4>
+                    <table style="width:100%; border-collapse: collapse; margin-top: 10px;">
+                        <thead>
+                            <tr>
+                                <th style="text-align:left; border-bottom:1px solid #dee2e6; padding:8px;">Node</th>
+                                <th style="text-align:left; border-bottom:1px solid #dee2e6; padding:8px;">Active Stress Tests</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for node, count in cluster_status.per_node.items() %}
+                            <tr>
+                                <td style="padding:8px; border-bottom:1px solid #f1f3f5;">{{ node }}</td>
+                                <td style="padding:8px; border-bottom:1px solid #f1f3f5;">{{ count }}</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% else %}
+                    <div class="status warning">
+                        Noch keine laufenden Stress Tests im Cluster erkannt.
+                    </div>
+                {% endif %}
+            {% endif %}
         </div>
 
         <div class="form-section">
@@ -545,7 +665,8 @@ HTML_TEMPLATE = """
             <div class="endpoint">GET /metrics - System Metriken</div>
             <div class="endpoint">POST /stress - Stress Test starten</div>
             <div class="endpoint">POST /echo - Echo Service aufrufen</div>
-            <div class="endpoint">GET /status - Aktueller Status</div>
+            <div class="endpoint">GET /status - Aktueller Status (Pod)</div>
+            <div class="endpoint">GET /cluster-status - Clusterweiter Status</div>
             <div class="endpoint">POST /stop - Alle Tests stoppen</div>
         </div>
     </div>
@@ -583,9 +704,15 @@ HTML_TEMPLATE = """
 def index():
     """Hauptseite mit Web Interface"""
     metrics['requests_total'] += 1
-    return render_template_string(HTML_TEMPLATE, 
-                                metrics=metrics, 
-                                echo_service_url=echo_service_url)
+    cluster_status = get_cluster_stress_status()
+    return render_template_string(
+        HTML_TEMPLATE,
+        metrics=metrics,
+        echo_service_url=echo_service_url,
+        cluster_status=cluster_status,
+        pod_name=POD_NAME,
+        node_name=NODE_NAME
+    )
 
 @app.route('/health')
 def health():
@@ -875,13 +1002,14 @@ def start_stress():
             </html>
             """
 
-
 @app.route('/status')
 def status():
-    """Status Endpoint"""
+    """Status Endpoint (lokaler Pod)"""
     metrics['requests_total'] += 1
     
     return jsonify({
+        'pod_name': POD_NAME,
+        'node_name': NODE_NAME,
         'active_stress_processes': len(current_stress_processes),
         'metrics': metrics,
         'echo_service': {
@@ -897,13 +1025,20 @@ def status():
         'timestamp': datetime.now().isoformat()
     })
 
+@app.route('/cluster-status')
+def cluster_status():
+    """Clusterweite Sicht auf Stress-Tests"""
+    metrics['requests_total'] += 1
+    status = get_cluster_stress_status()
+    return jsonify(status)
+
 @app.route('/stop', methods=['POST'])
 def stop_stress():
     """Stoppt alle aktiven Stress Tests"""
     global current_stress_processes
     
     stopped_count = 0
-    for process in current_stress_processes[:]:  # Copy list to avoid modification during iteration
+    for process in current_stress_processes[:]:  # Copy list to avoid modification während Iteration
         try:
             process.terminate()
             process.wait(timeout=5)
@@ -937,7 +1072,7 @@ if __name__ == '__main__':
     
     # Server konfigurieren
     port = int(os.environ.get('PORT', 8080))
-    host = os.environ.get('HOST', '0.0.0.0')
+    host = int(os.environ.get('HOST', '0.0.0.0')) if False else os.environ.get('HOST', '0.0.0.0')
     
     logger.info(f"🚀 Starte Load Testing Application v2.0 auf {host}:{port}")
     logger.info(f"Echo Service URL: {echo_service_url}")
@@ -947,7 +1082,8 @@ if __name__ == '__main__':
     logger.info("  GET  /metrics - System Metriken")
     logger.info("  POST /stress - Stress Test starten")
     logger.info("  POST /echo - Echo Service aufrufen")
-    logger.info("  GET  /status - Status Information")
+    logger.info("  GET  /status - Status Information (Pod)")
+    logger.info("  GET  /cluster-status - Clusterweite Status Information")
     logger.info("  POST /stop - Alle Tests stoppen")
     
     # Produktionsserver für Container
@@ -960,4 +1096,3 @@ if __name__ == '__main__':
             app.run(host=host, port=port, debug=False)
     else:
         app.run(host=host, port=port, debug=False)
-

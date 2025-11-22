@@ -36,6 +36,40 @@ data:
   LOG4J2_DISABLE_JNDI: "false"  # VULNERABLE
 
 ---
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: load-test-app-sa
+  namespace: load-testing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: load-test-app-reader
+  namespace: load-testing
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: load-test-app-reader-binding
+  namespace: load-testing
+subjects:
+  - kind: ServiceAccount
+    name: load-test-app-sa
+    namespace: load-testing
+roleRef:
+  kind: Role
+  name: load-test-app-reader
+  apiGroup: rbac.authorization.k8s.io
+
+
+---
+
 # Secret für potenzielle Credentials (demo)
 apiVersion: v1
 kind: Secret
@@ -89,6 +123,7 @@ spec:
         # Deployment Info
         kubectl.kubernetes.io/default-container: load-test-app
     spec:
+      serviceAccountName: load-test-app-sa
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -122,7 +157,8 @@ spec:
           valueFrom:
             fieldRef:
               fieldPath: spec.nodeName
-        
+        - name: ECHO_SERVICE_URL
+          value: "http://vulnerable-echo-service:8085"   
         # Resource Limits
         resources:
           requests:
