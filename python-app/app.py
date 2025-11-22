@@ -179,6 +179,7 @@ def run_stress_ng(cpu_workers=2, memory_workers=1, duration=30, memory_size="256
     try:
         cmd = [
             'stress-ng',
+            '--temp-path', '/tmp',
             '--cpu', str(cpu_workers),
             '--vm', str(memory_workers),
             '--vm-bytes', memory_size,
