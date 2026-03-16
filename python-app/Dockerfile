@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y \
 
 # Python dependencies
 COPY requirements.txt /tmp/
-RUN pip install --no-cache-dir --user -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 
 # Production stage
 FROM python:3.9-slim-bullseye
@@ -35,15 +35,14 @@ RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
 WORKDIR /app
 
 # Python packages von builder stage kopieren
-COPY --from=builder /root/.local /home/appuser/.local
+COPY --from=builder /install /usr/local
 
 # Application code kopieren
 COPY --chown=appuser:appuser app.py /app/
 COPY --chown=appuser:appuser requirements.txt /app/
 
 # Environment variables
-ENV PATH=/home/appuser/.local/bin:$PATH \
-    PYTHONPATH=/app \
+ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     FLASK_ENV=production \
     PORT=8080 \
