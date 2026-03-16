@@ -5,7 +5,7 @@ RUN mvn dependency:go-offline -B
 COPY src ./src
 RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:11.0.11_9-jre
+FROM eclipse-temurin:11.0.17_8-jre
 LABEL vulnerability="CVE-2021-44228"
 LABEL log4j-version="2.14.1"
 
