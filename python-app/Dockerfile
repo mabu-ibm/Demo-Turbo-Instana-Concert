@@ -1,5 +1,5 @@
 # Multi-stage build für optimierte Container-Größe
-FROM python:3.11-slim as builder
+FROM python:3.9-slim-buster as builder
 
 # Build dependencies
 RUN apt-get update && apt-get install -y \
@@ -12,7 +12,7 @@ COPY requirements.txt /tmp/
 RUN pip install --no-cache-dir --user -r /tmp/requirements.txt
 
 # Production stage
-FROM python:3.11-slim
+FROM python:3.9-slim-buster
 
 # Metadata
 LABEL maintainer="mbx1010" \
