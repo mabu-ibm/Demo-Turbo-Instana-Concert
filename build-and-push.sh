@@ -97,7 +97,7 @@ create_missing_files() {
         log_info "Creating Python Dockerfile..."
         cat > "$PYTHON_DIR/Dockerfile" << 'EOF'
 # Multi-stage build für optimierte Container-Größe
-FROM python:3.11-slim as builder
+FROM python:3.9-slim-bullseye AS builder
 
 # Build dependencies
 RUN apt-get update && apt-get install -y \
@@ -110,7 +110,7 @@ COPY requirements.txt /tmp/
 RUN pip install --no-cache-dir --user -r /tmp/requirements.txt
 
 # Production stage
-FROM python:3.11-slim
+FROM python:3.9-slim-bullseye
 
 # Metadata
 LABEL maintainer="mbx1010" \
@@ -169,76 +169,36 @@ EOF
         log_info "Creating Java Dockerfile..."
         cat > "$JAVA_DIR/Dockerfile" << 'EOF'
 # Multi-stage build für Java Application
-FROM maven:3.8.6-openjdk-11-slim as builder
-
-# Metadata
-LABEL stage=builder
-
-# Working directory
-WORKDIR /build
-
-# Copy pom.xml first for dependency caching
-COPY pom.xml .
-
-# Download dependencies
-RUN mvn dependency:go-offline -B
-
-# Copy source code
-COPY src ./src
-
-# Build application
-RUN mvn clean package -DskipTests -B
-
-# Production stage
-FROM openjdk:11-jre-slim
-
-# Metadata
-LABEL maintainer="mbx1010" \
-      version="1.0.0-VULNERABLE" \
-      description="Vulnerable Echo Service with Log4j CVE-2021-44228" \
-      vulnerability="CVE-2021-44228" \
-      security.policy="test-only" \
-      org.opencontainers.image.source="https://github.com/mbx1010/vulnerable-echo-service"
-
-# System dependencies
-RUN apt-get update && apt-get install -y \
-    curl \
-    net-tools \
-    && rm -rf /var/lib/apt/lists/*
-
-# Non-root user erstellen
-RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
-
-# Working directory
+FROM maven:3.8.4-eclipse-temurin-11 AS build
 WORKDIR /app
+COPY pom.xml .
+RUN mvn dependency:go-offline -B
+COPY src ./src
+RUN mvn clean package -DskipTests
 
-# Create log directory
-RUN mkdir -p /app/logs && chown -R appuser:appuser /app/logs
+FROM eclipse-temurin:11.0.17_8-jre
+LABEL vulnerability="CVE-2021-44228"
+LABEL log4j-version="2.14.1"
 
-# Copy JAR from builder stage
-COPY --from=builder /build/target/vulnerable-echo-service-*.jar app.jar
+RUN groupadd -r appuser && useradd -r -g appuser appuser
+RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Change ownership
+WORKDIR /app
+COPY --from=build /app/target/vulnerable-echo-service-*.jar app.jar
 RUN chown -R appuser:appuser /app
 
-# Environment variables
-ENV JAVA_OPTS="-Xmx512m -Xms256m" \
-    SERVER_PORT=8085 \
-    LOG4J_FORMAT_MSG_NO_LOOKUPS=false \
-    LOG4J2_DISABLE_JNDI=false
-
-# Health check
-HEALTHCHECK --interval=30s --timeout=10s --start-period=60s --retries=3 \
-    CMD curl -f http://localhost:${SERVER_PORT}/health || exit 1
-
-# User wechseln
 USER appuser
 
-# Port exposieren
+ENV JAVA_OPTS="-Xmx512m -Xms256m"
+ENV SERVER_PORT=8085
+ENV LOG4J2_DISABLE_JNDI=false
+
 EXPOSE 8085
 
-# Application starten
-CMD java $JAVA_OPTS -jar app.jar --server.port=$SERVER_PORT
+HEALTHCHECK --interval=30s --timeout=10s --start-period=15s --retries=3 \
+    CMD curl -f http://localhost:8085/health || exit 1
+
+CMD java $JAVA_OPTS -Dserver.port=$SERVER_PORT -jar app.jar
 EOF
         log_success "Java Dockerfile created"
     fi
@@ -330,7 +290,7 @@ build_python_app() {
     local latest_tag="${DOCKER_REGISTRY}/${DOCKER_USERNAME}/${PYTHON_APP_NAME}:latest"
     
     log_info "Building image: $image_tag"
-    if docker build -t "$image_tag" -t "$latest_tag" .; then
+    if docker build --no-cache -t "$image_tag" -t "$latest_tag" .; then
         log_success "Python app built successfully"
     else
         log_error "Failed to build Python app"
@@ -363,7 +323,7 @@ build_java_app() {
     local latest_tag="${DOCKER_REGISTRY}/${DOCKER_USERNAME}/${JAVA_APP_NAME}:latest"
     
     log_info "Building image: $image_tag"
-    if docker build -t "$image_tag" -t "$latest_tag" .; then
+    if docker build --no-cache -t "$image_tag" -t "$latest_tag" .; then
         log_success "Java app built successfully"
     else
         log_error "Failed to build Java app"
