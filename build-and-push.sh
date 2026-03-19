@@ -107,7 +107,7 @@ RUN apt-get update && apt-get install -y \
 
 # Python dependencies
 COPY requirements.txt /tmp/
-RUN pip install --no-cache-dir --user -r /tmp/requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r /tmp/requirements.txt
 
 # Production stage
 FROM python:3.9-slim-bullseye
@@ -133,15 +133,14 @@ RUN groupadd -r appuser && useradd -r -g appuser -u 1000 appuser
 WORKDIR /app
 
 # Python packages von builder stage kopieren
-COPY --from=builder /root/.local /home/appuser/.local
+COPY --from=builder /install /usr/local
 
 # Application code kopieren
 COPY --chown=appuser:appuser app.py /app/
 COPY --chown=appuser:appuser requirements.txt /app/
 
 # Environment variables
-ENV PATH=/home/appuser/.local/bin:$PATH \
-    PYTHONPATH=/app \
+ENV PYTHONPATH=/app \
     PYTHONUNBUFFERED=1 \
     FLASK_ENV=production \
     PORT=8080 \
@@ -305,23 +304,33 @@ build_python_app() {
         log_error "Failed to push Python app"
         exit 1
     fi
-    
+
+    # Capture and display image digest
+    local digest
+    digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image_tag" 2>/dev/null || echo "")
+    if [[ -n "$digest" ]]; then
+        log_success "Python app digest: $digest"
+    else
+        log_warning "Could not retrieve digest for Python app"
+    fi
+
     echo "Python App Images:"
     echo "  - $image_tag"
     echo "  - $latest_tag"
-    
+    [[ -n "$digest" ]] && echo "  - Digest: $digest"
+
     cd "$SCRIPT_DIR"
 }
 
 # Build Java Vulnerable Echo Service
 build_java_app() {
     log_info "Building Java Vulnerable Echo Service..."
-    
+
     cd "$JAVA_DIR"
-    
+
     local image_tag="${DOCKER_REGISTRY}/${DOCKER_USERNAME}/${JAVA_APP_NAME}:${VERSION}"
     local latest_tag="${DOCKER_REGISTRY}/${DOCKER_USERNAME}/${JAVA_APP_NAME}:latest"
-    
+
     log_info "Building image: $image_tag"
     if docker build --no-cache -t "$image_tag" -t "$latest_tag" .; then
         log_success "Java app built successfully"
@@ -329,7 +338,7 @@ build_java_app() {
         log_error "Failed to build Java app"
         exit 1
     fi
-    
+
     # Push to registry
     log_info "Pushing Java app to registry..."
     if docker push "$image_tag" && docker push "$latest_tag"; then
@@ -338,11 +347,21 @@ build_java_app() {
         log_error "Failed to push Java app"
         exit 1
     fi
-    
+
+    # Capture and display image digest
+    local digest
+    digest=$(docker inspect --format='{{index .RepoDigests 0}}' "$image_tag" 2>/dev/null || echo "")
+    if [[ -n "$digest" ]]; then
+        log_success "Java app digest: $digest"
+    else
+        log_warning "Could not retrieve digest for Java app"
+    fi
+
     echo "Java App Images:"
     echo "  - $image_tag"
     echo "  - $latest_tag"
-    
+    [[ -n "$digest" ]] && echo "  - Digest: $digest"
+
     cd "$SCRIPT_DIR"
 }
 
