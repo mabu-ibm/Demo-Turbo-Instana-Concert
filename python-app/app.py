@@ -149,16 +149,27 @@ def _metrics_loop():
 MAX_CONCURRENT_STRESS = 4
 
 def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_size):
-    """Run stress-ng in a background thread. Non-blocking."""
+    """Run stress-ng in a background thread. Non-blocking.
+    Uses --cpu-method matrixprod which works reliably in restricted containers.
+    Falls back to CPU-only if vm stressor fails.
+    """
+    # Build command - use matrixprod method which doesn't need special caps
     cmd = [
         'stress-ng',
         '--temp-path', '/tmp',
         '--cpu', str(cpu_workers),
-        '--vm', str(memory_workers),
-        '--vm-bytes', memory_size,
+        '--cpu-method', 'matrixprod',
         '--timeout', f'{duration}s',
         '--metrics-brief',
     ]
+
+    # Add memory stressor if requested
+    if memory_workers > 0:
+        cmd.extend([
+            '--vm', str(memory_workers),
+            '--vm-bytes', memory_size,
+            '--vm-method', 'all',
+        ])
 
     logger.info(f"[{job_id}] Starting stress-ng: {' '.join(cmd)}")
     inc_metric('stress_tests_started')
@@ -171,15 +182,42 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
             if job_id in _active_jobs:
                 _active_jobs[job_id]['process'] = process
 
-        # Wait for completion (in background thread, so Flask stays responsive)
         output, _ = process.communicate()
 
         if process.returncode == 0:
             inc_metric('stress_tests_completed')
             logger.info(f"[{job_id}] stress-ng finished successfully")
         else:
-            inc_metric('stress_tests_failed')
-            logger.warning(f"[{job_id}] stress-ng exited with code {process.returncode}")
+            # If failed with vm stressor, retry CPU-only
+            if memory_workers > 0:
+                logger.warning(f"[{job_id}] stress-ng failed (code {process.returncode}), retrying CPU-only")
+                logger.warning(f"[{job_id}] output: {output[:500] if output else 'none'}")
+                cmd_cpu = [
+                    'stress-ng',
+                    '--temp-path', '/tmp',
+                    '--cpu', str(cpu_workers),
+                    '--cpu-method', 'matrixprod',
+                    '--timeout', f'{duration}s',
+                    '--metrics-brief',
+                ]
+                process2 = subprocess.Popen(
+                    cmd_cpu, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+                )
+                with _jobs_lock:
+                    if job_id in _active_jobs:
+                        _active_jobs[job_id]['process'] = process2
+                output2, _ = process2.communicate()
+                if process2.returncode == 0:
+                    inc_metric('stress_tests_completed')
+                    logger.info(f"[{job_id}] stress-ng CPU-only finished successfully")
+                else:
+                    inc_metric('stress_tests_failed')
+                    logger.warning(f"[{job_id}] stress-ng CPU-only also failed (code {process2.returncode})")
+                    logger.warning(f"[{job_id}] output: {output2[:500] if output2 else 'none'}")
+            else:
+                inc_metric('stress_tests_failed')
+                logger.warning(f"[{job_id}] stress-ng exited with code {process.returncode}")
+                logger.warning(f"[{job_id}] output: {output[:500] if output else 'none'}")
 
     except FileNotFoundError:
         inc_metric('stress_tests_failed')
@@ -224,7 +262,7 @@ def _run_ramp_job(job_id, max_workers, step_duration, steps, memory_size):
             cmd = [
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
-                '--vm', '1', '--vm-bytes', memory_size,
+                '--cpu-method', 'matrixprod',
                 '--timeout', f'{step_duration}s',
                 '--metrics-brief',
             ]
@@ -283,7 +321,7 @@ def _run_wave_job(job_id, max_workers, period_sec, total_duration, memory_size):
             cmd = [
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
-                '--vm', '1', '--vm-bytes', memory_size,
+                '--cpu-method', 'matrixprod',
                 '--timeout', f'{remaining}s',
             ]
             logger.info(f"[{job_id}] Wave t={elapsed}s: {workers} CPU workers")
