@@ -735,7 +735,7 @@ HTML_TEMPLATE = """
         <!-- STRESS TEST -->
         <div id="tab-stress" class="tab-content active">
             <p style="color:#8899a6; margin-bottom:16px;">Constant CPU &amp; memory load via stress-ng</p>
-            <form method="post" action="/api/stress">
+            <form method="post" action="/stress">
                 <div class="form-grid">
                     <div class="fg"><label>CPU Workers</label><input type="number" name="cpu_workers" value="2" min="1" max="16"></div>
                     <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="1" min="0" max="8"></div>
@@ -755,7 +755,7 @@ HTML_TEMPLATE = """
         <!-- RAMP UP -->
         <div id="tab-ramp" class="tab-content">
             <p style="color:#8899a6; margin-bottom:16px;">Linearly increase CPU workers in steps (great for Turbonomic scaling tests)</p>
-            <form method="post" action="/api/ramp">
+            <form method="post" action="/ramp">
                 <div class="form-grid">
                     <div class="fg"><label>Max CPU Workers</label><input type="number" name="max_workers" value="8" min="1" max="16"></div>
                     <div class="fg"><label>Step Duration (sec)</label><input type="number" name="step_duration" value="20" min="5" max="300"></div>
@@ -775,7 +775,7 @@ HTML_TEMPLATE = """
         <!-- WAVE -->
         <div id="tab-wave" class="tab-content">
             <p style="color:#8899a6; margin-bottom:16px;">Sine-wave oscillating CPU load &mdash; simulates realistic traffic patterns</p>
-            <form method="post" action="/api/wave">
+            <form method="post" action="/wave">
                 <div class="form-grid">
                     <div class="fg"><label>Max CPU Workers</label><input type="number" name="max_workers" value="8" min="1" max="16"></div>
                     <div class="fg"><label>Wave Period (sec)</label><input type="number" name="period_sec" value="60" min="20" max="600"></div>
@@ -795,7 +795,7 @@ HTML_TEMPLATE = """
         <!-- ECHO SERVICE SINGLE -->
         <div id="tab-echo" class="tab-content">
             <p style="color:#8899a6; margin-bottom:16px;">Send a single request to the vulnerable Java Echo Service (Log4j CVE-2021-44228)</p>
-            <form method="post" action="/api/echo">
+            <form method="post" action="/echo">
                 <div class="fg"><label>Message</label><input type="text" name="message" value="Hello from Load Test v3.0" style="max-width:500px;"></div>
                 <div class="form-grid">
                     <div class="fg"><label>HTTP Method</label>
@@ -816,7 +816,7 @@ HTML_TEMPLATE = """
         <!-- ECHO FLOOD -->
         <div id="tab-flood" class="tab-content">
             <p style="color:#8899a6; margin-bottom:16px;">Sustained echo service load &mdash; generates continuous network traffic and logging</p>
-            <form method="post" action="/api/flood">
+            <form method="post" action="/flood">
                 <div class="form-grid">
                     <div class="fg"><label>Requests / sec</label><input type="number" name="rps" value="5" min="1" max="100"></div>
                     <div class="fg"><label>Duration (sec)</label><input type="number" name="duration" value="60" min="5" max="3600"></div>
@@ -882,13 +882,13 @@ function switchTab(e, id) {
 
 function stopAll() {
     if (!confirm('Stop ALL active jobs?')) return;
-    fetch('/api/stop', {method:'POST'}).then(r=>r.json()).then(d=>{
+    fetch('/stop', {method:'POST'}).then(r=>r.json()).then(d=>{
         alert(d.message); location.reload();
     });
 }
 
 function stopJob(jid) {
-    fetch('/api/stop/'+jid, {method:'POST'}).then(r=>r.json()).then(d=>{
+    fetch('/stop/'+jid, {method:'POST'}).then(r=>r.json()).then(d=>{
         alert(d.message); location.reload();
     });
 }
@@ -1002,6 +1002,7 @@ def api_stress():
 
 
 @app.route('/api/ramp', methods=['POST'])
+@app.route('/ramp', methods=['POST'])
 def api_ramp():
     inc_metric('requests_total')
     d = _form_or_json()
@@ -1017,6 +1018,7 @@ def api_ramp():
 
 
 @app.route('/api/wave', methods=['POST'])
+@app.route('/wave', methods=['POST'])
 def api_wave():
     inc_metric('requests_total')
     d = _form_or_json()
@@ -1045,6 +1047,7 @@ def api_echo():
 
 
 @app.route('/api/flood', methods=['POST'])
+@app.route('/flood', methods=['POST'])
 def api_flood():
     inc_metric('requests_total')
     d = _form_or_json()
@@ -1066,6 +1069,7 @@ def api_stop():
 
 
 @app.route('/api/stop/<job_id>', methods=['POST'])
+@app.route('/stop/<job_id>', methods=['POST'])
 def api_stop_job(job_id):
     ok = stop_job(job_id)
     if ok:
