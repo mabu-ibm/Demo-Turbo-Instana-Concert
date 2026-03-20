@@ -175,8 +175,11 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
     inc_metric('stress_tests_started')
 
     try:
+        env = os.environ.copy()
+        env['TMPDIR'] = '/tmp'
         process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            cwd='/tmp', env=env,
         )
         with _jobs_lock:
             if job_id in _active_jobs:
@@ -268,8 +271,11 @@ def _run_ramp_job(job_id, max_workers, step_duration, steps, memory_size):
             ]
             logger.info(f"[{job_id}] Ramp step {step}/{steps}: {workers} CPU workers")
 
+            env = os.environ.copy()
+            env['TMPDIR'] = '/tmp'
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True)
+                                    stderr=subprocess.STDOUT, text=True,
+                                    cwd='/tmp', env=env)
             with _jobs_lock:
                 if job_id in _active_jobs:
                     _active_jobs[job_id]['process'] = proc
@@ -326,8 +332,11 @@ def _run_wave_job(job_id, max_workers, period_sec, total_duration, memory_size):
             ]
             logger.info(f"[{job_id}] Wave t={elapsed}s: {workers} CPU workers")
 
+            env = os.environ.copy()
+            env['TMPDIR'] = '/tmp'
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE,
-                                    stderr=subprocess.STDOUT, text=True)
+                                    stderr=subprocess.STDOUT, text=True,
+                                    cwd='/tmp', env=env)
             with _jobs_lock:
                 if job_id in _active_jobs:
                     _active_jobs[job_id]['process'] = proc
