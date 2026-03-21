@@ -8,7 +8,7 @@ on:
 env:
   PYTHON_IMAGE: mbx1010/load-test-app
   JAVA_IMAGE: mbx1010/vulnerable-echo-service
-  K8S_CTX: kubernetes-admin@kubernetes
+  K8S_CTX: kubernetes
   NAMESPACE: load-testing
 
 jobs:

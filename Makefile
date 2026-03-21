@@ -1,7 +1,7 @@
 REGISTRY  := docker.io
 USERNAME  := mbx1010
 TAG       := $(shell git rev-parse --short HEAD 2>/dev/null || echo "latest")
-K8S_CTX   := kubernetes-admin@kubernetes
+K8S_CTX   := kubernetes
 NAMESPACE := load-testing
 
 PYTHON_IMAGE := $(REGISTRY)/$(USERNAME)/load-test-app
