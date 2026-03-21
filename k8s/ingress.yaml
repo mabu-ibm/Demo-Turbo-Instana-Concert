@@ -16,7 +16,7 @@ spec:
   rules:
   - http:
       paths:
-      # Load Test App API Routen (WICHTIG!)
+      # Load Test App routes
       - path: /stress
         pathType: Exact
         backend:
@@ -32,6 +32,27 @@ spec:
             port:
               number: 80
       - path: /stop
+        pathType: Prefix
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /ramp
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /wave
+        pathType: Exact
+        backend:
+          service:
+            name: load-test-service
+            port:
+              number: 80
+      - path: /flood
         pathType: Exact
         backend:
           service:
@@ -59,8 +80,7 @@ spec:
             name: load-test-service
             port:
               number: 80
-      
-      # Echo Service direkte API
+      # Echo Service direct API
       - path: /api/echo
         pathType: Prefix
         backend:
@@ -68,7 +88,6 @@ spec:
             name: vulnerable-echo-service
             port:
               number: 8085
-      
       # Default - Load Test App
       - path: /
         pathType: Prefix
@@ -77,5 +96,3 @@ spec:
             name: load-test-service
             port:
               number: 80
-
-

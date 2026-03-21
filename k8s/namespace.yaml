@@ -1,0 +1,53 @@
+# Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: load-testing
+  labels:
+    name: load-testing
+    app.kubernetes.io/name: load-testing
+    security.policy.io/isolation: test-environment
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: load-test-app-sa
+  namespace: load-testing
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: load-test-app-reader
+  namespace: load-testing
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: load-test-app-reader-binding
+  namespace: load-testing
+subjects:
+  - kind: ServiceAccount
+    name: load-test-app-sa
+    namespace: load-testing
+roleRef:
+  kind: Role
+  name: load-test-app-reader
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# Secret for demo credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: app-secrets
+  namespace: load-testing
+type: Opaque
+data:
+  database-user: bG9hZHRlc3Q=
+  database-password: cGFzc3dvcmQ=
+  api-key: dGVzdC1hcGkta2V5

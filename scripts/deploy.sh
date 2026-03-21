@@ -7,7 +7,8 @@ set -euo pipefail
 # Configuration
 NAMESPACE="${2:-load-testing}"
 ACTION="${1:-deploy}"
-MANIFEST_FILE="kubernetes-manifest.yaml"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+MANIFEST_DIR="$SCRIPT_DIR/../k8s"
 KUBECTL_TIMEOUT="300s"
 
 # Colors for output
@@ -71,8 +72,8 @@ check_prerequisites() {
     fi
     
     # Check if manifest exists
-    if [[ ! -f "$MANIFEST_FILE" ]]; then
-        log_error "Manifest file $MANIFEST_FILE not found"
+    if [[ ! -f "$MANIFEST_DIR/" ]]; then
+        log_error "Manifest file $MANIFEST_DIR/ not found"
         exit 1
     fi
     
@@ -84,7 +85,7 @@ deploy_application() {
     log_info "Deploying Load Testing Application to namespace: $NAMESPACE"
     
     # Apply manifest
-    if kubectl apply -f "$MANIFEST_FILE" --timeout="$KUBECTL_TIMEOUT"; then
+    if kubectl apply -f "$MANIFEST_DIR/" --timeout="$KUBECTL_TIMEOUT"; then
         log_success "Manifest applied successfully"
     else
         log_error "Failed to apply manifest"
@@ -123,7 +124,7 @@ delete_application() {
         exit 0
     fi
     
-    if kubectl delete -f "$MANIFEST_FILE" --timeout="$KUBECTL_TIMEOUT"; then
+    if kubectl delete -f "$MANIFEST_DIR/" --timeout="$KUBECTL_TIMEOUT"; then
         log_success "Application deleted successfully"
     else
         log_error "Failed to delete application"
