@@ -72,8 +72,8 @@ check_prerequisites() {
     fi
     
     # Check if manifest exists
-    if [[ ! -f "$MANIFEST_DIR/" ]]; then
-        log_error "Manifest file $MANIFEST_DIR/ not found"
+    if [[ ! -d "$MANIFEST_DIR" ]]; then
+        log_error "Manifest directory $MANIFEST_DIR not found"
         exit 1
     fi
     
