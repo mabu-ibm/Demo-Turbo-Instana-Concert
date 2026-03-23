@@ -150,10 +150,13 @@ MAX_CONCURRENT_STRESS = 8
 
 def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_size):
     """Run stress-ng in a background thread. Non-blocking.
-    Uses --cpu-method matrixprod which works reliably in restricted containers.
-    Falls back to CPU-only if vm stressor fails.
+
+    Key insight: stress-ng workers don't need to match the pod CPU limit.
+    The Linux CFS scheduler throttles the container automatically.
+    2 workers will saturate ANY CPU limit (100m, 250m, 1 core, etc.)
+    because the kernel pauses the container once its quota is used.
+    More workers just add context-switching overhead without benefit.
     """
-    # Build command - use matrixprod method which doesn't need special caps
     env = os.environ.copy()
     env['TMPDIR'] = '/tmp'
     popen_kwargs = dict(
@@ -161,12 +164,15 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
         cwd='/tmp', env=env,
     )
 
+    # Keep workers reasonable — 2 is optimal for hitting 100% of any CPU limit
+    # Higher values still work but add unnecessary context switching
+    effective_workers = min(cpu_workers, 4)
+
     cmd = [
         'stress-ng',
         '--temp-path', '/tmp',
-        '--cpu', str(cpu_workers),
+        '--cpu', str(effective_workers),
         '--cpu-method', 'matrixprod',
-        '--cpu-load', '100',
         '--timeout', f'{duration}s',
         '--metrics-brief',
     ]
@@ -178,7 +184,7 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
             '--vm-bytes', memory_size,
         ])
 
-    logger.info(f"[{job_id}] Starting stress-ng: {' '.join(cmd)}")
+    logger.info(f"[{job_id}] Starting stress-ng ({effective_workers} workers, {duration}s): {' '.join(cmd)}")
     inc_metric('stress_tests_started')
 
     try:
@@ -191,17 +197,16 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
 
         if process.returncode == 0:
             inc_metric('stress_tests_completed')
-            logger.info(f"[{job_id}] stress-ng finished successfully")
+            logger.info(f"[{job_id}] stress-ng finished successfully after {duration}s")
         else:
             logger.warning(f"[{job_id}] stress-ng failed (code {process.returncode})")
             logger.warning(f"[{job_id}] output: {output[:500] if output else 'none'}")
-            # Retry CPU-only, still with --cpu-load 100
+            # Retry CPU-only (drop memory stressor which may cause failures)
             cmd_cpu = [
                 'stress-ng',
                 '--temp-path', '/tmp',
-                '--cpu', str(cpu_workers),
+                '--cpu', str(effective_workers),
                 '--cpu-method', 'matrixprod',
-                '--cpu-load', '100',
                 '--timeout', f'{duration}s',
                 '--metrics-brief',
             ]
@@ -263,12 +268,11 @@ def _run_ramp_job(job_id, max_workers, step_duration, steps, memory_size):
                 logger.info(f"[{job_id}] Ramp stopped at step {step}")
                 break
 
-            workers = max(1, int(max_workers * step / steps))
+            workers = max(1, min(int(max_workers * step / steps), 4))
             cmd = [
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
                 '--cpu-method', 'matrixprod',
-                '--cpu-load', '100',
                 '--timeout', f'{step_duration}s',
                 '--metrics-brief',
             ]
@@ -324,14 +328,13 @@ def _run_wave_job(job_id, max_workers, period_sec, total_duration, memory_size):
 
             # Sine wave: 1 .. max_workers
             frac = (math.sin(2 * math.pi * elapsed / period_sec) + 1) / 2
-            workers = max(1, int(frac * max_workers))
+            workers = max(1, min(int(frac * max_workers), 4))
             remaining = min(step_len, total_duration - elapsed)
 
             cmd = [
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
                 '--cpu-method', 'matrixprod',
-                '--cpu-load', '100',
                 '--timeout', f'{remaining}s',
             ]
             logger.info(f"[{job_id}] Wave t={elapsed}s: {workers} CPU workers")
@@ -788,8 +791,8 @@ HTML_TEMPLATE = """
             <p style="color:#8899a6; margin-bottom:16px;">Constant CPU &amp; memory load via stress-ng</p>
             <form method="post" action="/stress">
                 <div class="form-grid">
-                    <div class="fg"><label>CPU Workers</label><input type="number" name="cpu_workers" value="4" min="1" max="32"></div>
-                    <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="1" min="0" max="16"></div>
+                    <div class="fg"><label>CPU Workers (max 4)</label><input type="number" name="cpu_workers" value="2" min="1" max="4"></div>
+                    <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="0" min="0" max="4"></div>
                     <div class="fg"><label>Duration (sec)</label><input type="number" name="duration" value="60" min="5" max="3600"></div>
                     <div class="fg"><label>Memory Size</label>
                         <select name="memory_size">
