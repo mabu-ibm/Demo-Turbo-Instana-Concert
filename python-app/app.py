@@ -176,7 +176,6 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
         cmd.extend([
             '--vm', str(memory_workers),
             '--vm-bytes', memory_size,
-            '--vm-method', 'all',
         ])
 
     logger.info(f"[{job_id}] Starting stress-ng: {' '.join(cmd)}")
@@ -196,12 +195,13 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
         else:
             logger.warning(f"[{job_id}] stress-ng failed (code {process.returncode})")
             logger.warning(f"[{job_id}] output: {output[:500] if output else 'none'}")
-            # Retry CPU-only without --cpu-load (some versions don't support it)
+            # Retry CPU-only, still with --cpu-load 100
             cmd_cpu = [
                 'stress-ng',
                 '--temp-path', '/tmp',
                 '--cpu', str(cpu_workers),
                 '--cpu-method', 'matrixprod',
+                '--cpu-load', '100',
                 '--timeout', f'{duration}s',
                 '--metrics-brief',
             ]

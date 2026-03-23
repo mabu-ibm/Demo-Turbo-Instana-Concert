@@ -132,7 +132,7 @@ spec:
       
       containers:
       - name: load-test-app
-        image: docker/mbx1010/load-test-app:2.0
+        image: docker.io/mbx1010/load-test-app:2.0
         imagePullPolicy: Always
         
         ports:
@@ -284,7 +284,7 @@ spec:
       
       containers:
       - name: vulnerable-echo-service
-        image: docker/mbx1010/vulnerable-echo-service:latest
+        image: docker.io/mbx1010/vulnerable-echo-service:latest
         imagePullPolicy: Always
         
         ports:
