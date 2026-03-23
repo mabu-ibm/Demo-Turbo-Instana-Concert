@@ -146,7 +146,7 @@ def _metrics_loop():
 # ---------------------------------------------------------------------------
 # stress-ng runner (non-blocking)
 # ---------------------------------------------------------------------------
-MAX_CONCURRENT_STRESS = 4
+MAX_CONCURRENT_STRESS = 8
 
 def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_size):
     """Run stress-ng in a background thread. Non-blocking.
@@ -159,6 +159,8 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
         '--temp-path', '/tmp',
         '--cpu', str(cpu_workers),
         '--cpu-method', 'matrixprod',
+        '--cpu-load', '100',
+        '--aggressive',
         '--timeout', f'{duration}s',
         '--metrics-brief',
     ]
@@ -266,6 +268,8 @@ def _run_ramp_job(job_id, max_workers, step_duration, steps, memory_size):
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
                 '--cpu-method', 'matrixprod',
+                '--cpu-load', '100',
+                '--aggressive',
                 '--timeout', f'{step_duration}s',
                 '--metrics-brief',
             ]
@@ -328,6 +332,8 @@ def _run_wave_job(job_id, max_workers, period_sec, total_duration, memory_size):
                 'stress-ng', '--temp-path', '/tmp',
                 '--cpu', str(workers),
                 '--cpu-method', 'matrixprod',
+                '--cpu-load', '100',
+                '--aggressive',
                 '--timeout', f'{remaining}s',
             ]
             logger.info(f"[{job_id}] Wave t={elapsed}s: {workers} CPU workers")
@@ -784,8 +790,8 @@ HTML_TEMPLATE = """
             <p style="color:#8899a6; margin-bottom:16px;">Constant CPU &amp; memory load via stress-ng</p>
             <form method="post" action="/stress">
                 <div class="form-grid">
-                    <div class="fg"><label>CPU Workers</label><input type="number" name="cpu_workers" value="2" min="1" max="16"></div>
-                    <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="1" min="0" max="8"></div>
+                    <div class="fg"><label>CPU Workers</label><input type="number" name="cpu_workers" value="4" min="1" max="32"></div>
+                    <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="1" min="0" max="16"></div>
                     <div class="fg"><label>Duration (sec)</label><input type="number" name="duration" value="60" min="5" max="3600"></div>
                     <div class="fg"><label>Memory Size</label>
                         <select name="memory_size">
