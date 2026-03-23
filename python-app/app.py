@@ -151,11 +151,10 @@ MAX_CONCURRENT_STRESS = 8
 def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_size):
     """Run stress-ng in a background thread. Non-blocking.
 
-    Key insight: stress-ng workers don't need to match the pod CPU limit.
-    The Linux CFS scheduler throttles the container automatically.
-    2 workers will saturate ANY CPU limit (100m, 250m, 1 core, etc.)
-    because the kernel pauses the container once its quota is used.
-    More workers just add context-switching overhead without benefit.
+    Uses --cpu 0 to spawn one worker per available CPU. The Linux CFS
+    scheduler throttles the container to its CPU limit automatically.
+    This guarantees 100% utilization of whatever limit is set (100m,
+    250m, 1 core, 2 cores, etc.) without needing to know the limit.
     """
     env = os.environ.copy()
     env['TMPDIR'] = '/tmp'
@@ -164,15 +163,10 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
         cwd='/tmp', env=env,
     )
 
-    # Keep workers reasonable — 2 is optimal for hitting 100% of any CPU limit
-    # Higher values still work but add unnecessary context switching
-    effective_workers = min(cpu_workers, 4)
-
     cmd = [
         'stress-ng',
         '--temp-path', '/tmp',
-        '--cpu', str(effective_workers),
-        '--cpu-method', 'matrixprod',
+        '--cpu', '0',
         '--timeout', f'{duration}s',
         '--metrics-brief',
     ]
@@ -184,7 +178,7 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
             '--vm-bytes', memory_size,
         ])
 
-    logger.info(f"[{job_id}] Starting stress-ng ({effective_workers} workers, {duration}s): {' '.join(cmd)}")
+    logger.info(f"[{job_id}] Starting stress-ng (--cpu 0, {duration}s): {' '.join(cmd)}")
     inc_metric('stress_tests_started')
 
     try:
@@ -205,8 +199,7 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
             cmd_cpu = [
                 'stress-ng',
                 '--temp-path', '/tmp',
-                '--cpu', str(effective_workers),
-                '--cpu-method', 'matrixprod',
+                '--cpu', '0',
                 '--timeout', f'{duration}s',
                 '--metrics-brief',
             ]
@@ -223,11 +216,6 @@ def _run_stress_ng_job(job_id, cpu_workers, memory_workers, duration, memory_siz
                 inc_metric('stress_tests_failed')
                 logger.warning(f"[{job_id}] stress-ng CPU-only also failed (code {process2.returncode})")
                 logger.warning(f"[{job_id}] output: {output2[:500] if output2 else 'none'}")
-                    logger.warning(f"[{job_id}] output: {output2[:500] if output2 else 'none'}")
-            else:
-                inc_metric('stress_tests_failed')
-                logger.warning(f"[{job_id}] stress-ng exited with code {process.returncode}")
-                logger.warning(f"[{job_id}] output: {output[:500] if output else 'none'}")
 
     except FileNotFoundError:
         inc_metric('stress_tests_failed')
@@ -791,7 +779,7 @@ HTML_TEMPLATE = """
             <p style="color:#8899a6; margin-bottom:16px;">Constant CPU &amp; memory load via stress-ng</p>
             <form method="post" action="/stress">
                 <div class="form-grid">
-                    <div class="fg"><label>CPU Workers (max 4)</label><input type="number" name="cpu_workers" value="2" min="1" max="4"></div>
+                    <div class="fg"><label>CPU</label><input type="text" name="cpu_workers" value="auto (--cpu 0)" disabled></div>
                     <div class="fg"><label>Memory Workers</label><input type="number" name="memory_workers" value="0" min="0" max="4"></div>
                     <div class="fg"><label>Duration (sec)</label><input type="number" name="duration" value="60" min="5" max="3600"></div>
                     <div class="fg"><label>Memory Size</label>
