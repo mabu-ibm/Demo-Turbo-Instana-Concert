@@ -417,10 +417,14 @@ jobs:
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
           IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service"
           
+          echo "Current directory: $(pwd)"
+          echo "Listing files:"
+          ls -la
+          
           echo "Building Java Echo Service: ${IMAGE_NAME}:latest"
           docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} \
-            -f $WORKSPACE_DIR/java-app/Dockerfile \
-            $WORKSPACE_DIR/java-app
+            -f java-app/Dockerfile \
+            java-app
           
           echo "Pushing Java Echo Service images..."
           docker push ${IMAGE_NAME}:latest
@@ -436,8 +440,8 @@ jobs:
           
           echo "Building Python Load Test App: ${IMAGE_NAME}:latest"
           docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} \
-            -f $WORKSPACE_DIR/python-app/Dockerfile \
-            $WORKSPACE_DIR/python-app
+            -f python-app/Dockerfile \
+            python-app
           
           echo "Pushing Python Load Test App images..."
           docker push ${IMAGE_NAME}:latest
