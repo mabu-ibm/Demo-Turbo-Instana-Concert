@@ -410,51 +410,87 @@ jobs:
             --password-stdin
           echo "✓ Logged in to HTTP registry: ${{ secrets.GIT_REGISTRY }}"
 
-      # Step 7: Build and Push Docker Image
-      - name: Build and Push
+      # Step 7: Build and Push Java Echo Service
+      - name: Build and Push Java Echo Service
         run: |
           # Convert repository name to lowercase for Docker compatibility
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
-          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}"
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service"
           
-          echo "Building image: ${IMAGE_NAME}:latest"
-          docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} $WORKSPACE_DIR
+          echo "Building Java Echo Service: ${IMAGE_NAME}:latest"
+          docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} \
+            -f $WORKSPACE_DIR/java-app/Dockerfile \
+            $WORKSPACE_DIR/java-app
           
-          echo "Pushing images..."
+          echo "Pushing Java Echo Service images..."
           docker push ${IMAGE_NAME}:latest
           docker push ${IMAGE_NAME}:${{ gitea.sha }}
-          echo "✓ Images pushed successfully"
+          echo "✓ Java Echo Service images pushed successfully"
 
-      # Step 8: Generate SBOM using Syft
-      - name: Generate SBOM with Syft
+      # Step 8: Build and Push Python Load Test App
+      - name: Build and Push Python Load Test App
         run: |
-          # Check if syft is installed, if not use container
+          # Convert repository name to lowercase for Docker compatibility
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app"
+          
+          echo "Building Python Load Test App: ${IMAGE_NAME}:latest"
+          docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} \
+            -f $WORKSPACE_DIR/python-app/Dockerfile \
+            $WORKSPACE_DIR/python-app
+          
+          echo "Pushing Python Load Test App images..."
+          docker push ${IMAGE_NAME}:latest
+          docker push ${IMAGE_NAME}:${{ gitea.sha }}
+          echo "✓ Python Load Test App images pushed successfully"
+
+      # Step 9: Generate SBOM for Java App
+      - name: Generate SBOM for Java App
+        run: |
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service"
+          
+          echo "Generating SBOM for Java Echo Service..."
           if command -v syft &> /dev/null; then
-            syft "${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest" \
-              -o spdx-json=$WORKSPACE_DIR/sbom.json \
-              -o cyclonedx-json=$WORKSPACE_DIR/sbom-cyclonedx.json
+            syft "${IMAGE_NAME}:latest" \
+              -o spdx-json=$WORKSPACE_DIR/sbom-java.json \
+              -o cyclonedx-json=$WORKSPACE_DIR/sbom-java-cyclonedx.json
           else
-            echo "Syft not installed, using container..."
             docker run --rm \
               --user $(id -u):$(id -g) \
               -v /var/run/docker.sock:/var/run/docker.sock \
               -v "$WORKSPACE_DIR:/output" \
               -w /output \
               anchore/syft:latest \
-              "${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest" \
-              -o spdx-json=/output/sbom.json \
-              -o cyclonedx-json=/output/sbom-cyclonedx.json
+              "${IMAGE_NAME}:latest" \
+              -o spdx-json=/output/sbom-java.json \
+              -o cyclonedx-json=/output/sbom-java-cyclonedx.json
           fi
+          echo "✓ Java SBOM generated"
+
+      # Step 10: Generate SBOM for Python App
+      - name: Generate SBOM for Python App
+        run: |
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app"
           
-          echo "✓ SBOM generated"
-          # Verify SBOM files exist (use test instead of ls for better compatibility)
-          if [ -f "$WORKSPACE_DIR/sbom.json" ] && [ -f "$WORKSPACE_DIR/sbom-cyclonedx.json" ]; then
-            echo "SBOM files created successfully:"
-            echo "  - sbom.json ($(stat -f%z "$WORKSPACE_DIR/sbom.json" 2>/dev/null || stat -c%s "$WORKSPACE_DIR/sbom.json" 2>/dev/null || echo 'unknown') bytes)"
-            echo "  - sbom-cyclonedx.json ($(stat -f%z "$WORKSPACE_DIR/sbom-cyclonedx.json" 2>/dev/null || stat -c%s "$WORKSPACE_DIR/sbom-cyclonedx.json" 2>/dev/null || echo 'unknown') bytes)"
+          echo "Generating SBOM for Python Load Test App..."
+          if command -v syft &> /dev/null; then
+            syft "${IMAGE_NAME}:latest" \
+              -o spdx-json=$WORKSPACE_DIR/sbom-python.json \
+              -o cyclonedx-json=$WORKSPACE_DIR/sbom-python-cyclonedx.json
           else
-            echo "⚠️  Warning: SBOM files may not have been created"
+            docker run --rm \
+              --user $(id -u):$(id -g) \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$WORKSPACE_DIR:/output" \
+              -w /output \
+              anchore/syft:latest \
+              "${IMAGE_NAME}:latest" \
+              -o spdx-json=/output/sbom-python.json \
+              -o cyclonedx-json=/output/sbom-python-cyclonedx.json
           fi
+          echo "✓ Python SBOM generated"
 
       # Step 9: Upload SBOM to Concert (Optional)
       - name: Upload SBOM to Concert
@@ -469,14 +505,13 @@ jobs:
           pip3 install requests
           python3 $WORKSPACE_DIR/scripts/upload-sbom-to-concert.py $WORKSPACE_DIR/sbom.json --application-id "${CONCERT_APPLICATION_ID}" || echo "⚠ Concert upload skipped"
 
-      # Step 10: Upload SBOM Artifacts
+      # Step 11: Upload SBOM Artifacts
       - name: Upload SBOM Artifacts
         uses: actions/upload-artifact@v3
         with:
           name: sbom-files
           path: |
-            sbom.json
-            sbom-cyclonedx.json
+            sbom-*.json
           retention-days: 90
 
       # Step 11: Setup kubeconfig
@@ -499,83 +534,79 @@ jobs:
           kubectl cluster-info
           echo "✓ kubectl configured and connected"
 
-      # Step 12: Clean Up Existing Resources
-      - name: Clean Up Existing Resources
+      # Step 12: Create Namespace
+      - name: Create Namespace
         run: |
-          echo "Cleaning up existing resources for fresh deployment..."
-          
-          # Delete existing ingress
-          kubectl delete ingress hello-world-python-ingress -n default --ignore-not-found=true
-          echo "✓ Ingress deleted (if existed)"
-          
-          # Delete existing deployment and service
-          kubectl delete deployment hello-world-python -n default --ignore-not-found=true
-          kubectl delete service hello-world-python -n default --ignore-not-found=true
-          echo "✓ Deployment and service deleted (if existed)"
-          
-          # Delete existing TLS secret (will be recreated)
-          kubectl delete secret hello-world-python-tls -n default --ignore-not-found=true
-          echo "✓ TLS secret deleted (if existed)"
-          
-          # Wait a moment for resources to be fully deleted
-          sleep 5
-          
-          echo "✓ Cleanup complete - ready for fresh deployment"
+          echo "Creating namespace: demo-turbo-instana-concert"
+          kubectl apply -f $WORKSPACE_DIR/k8s/namespace.yaml
+          echo "✓ Namespace created/updated"
 
-      # Step 13: Deploy Application
-      - name: Deploy Application
+      # Step 13: Apply ConfigMaps
+      - name: Apply ConfigMaps
         run: |
-          # Replace variables in deployment.yaml with actual values from secrets
+          echo "Applying ConfigMaps..."
+          kubectl apply -f $WORKSPACE_DIR/k8s/configmaps.yaml
+          echo "✓ ConfigMaps applied"
+
+      # Step 14: Deploy Java Echo Service
+      - name: Deploy Java Echo Service
+        run: |
+          echo "Deploying Java Echo Service..."
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          
           sed -e "s|\${IMAGE_REGISTRY}|${{ secrets.GIT_REGISTRY }}|g" \
-              -e "s|\${IMAGE_REPOSITORY}|${{ gitea.repository }}|g" \
+              -e "s|\${IMAGE_REPOSITORY}|${REPO_LOWER}/echo-service|g" \
               -e "s|\${IMAGE_TAG}|latest|g" \
-              $WORKSPACE_DIR/k8s/deployment.yaml | kubectl apply -f -
+              $WORKSPACE_DIR/k8s/echo-service-deployment.yaml | kubectl apply -f -
           
-          kubectl rollout status deployment/hello-world-python -n default --timeout=5m
-          echo "✓ Application deployed"
+          kubectl rollout status deployment/vulnerable-echo-service -n demo-turbo-instana-concert --timeout=5m
+          echo "✓ Java Echo Service deployed"
 
-      # Step 14: Create TLS Certificate
+      # Step 15: Deploy Python Load Test App
+      - name: Deploy Python Load Test App
+        run: |
+          echo "Deploying Python Load Test App..."
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          
+          sed -e "s|\${IMAGE_REGISTRY}|${{ secrets.GIT_REGISTRY }}|g" \
+              -e "s|\${IMAGE_REPOSITORY}|${REPO_LOWER}/load-test-app|g" \
+              -e "s|\${IMAGE_TAG}|latest|g" \
+              $WORKSPACE_DIR/k8s/python-app-deployment.yaml | kubectl apply -f -
+          
+          kubectl rollout status deployment/load-test-app -n demo-turbo-instana-concert --timeout=5m
+          echo "✓ Python Load Test App deployed"
+
+      # Step 16: Create TLS Certificate
       - name: Create TLS Certificate
         run: |
-          # Use INGRESS_HOST from secrets (validated in Step 0)
           INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
           echo "Creating TLS certificate for: $INGRESS_HOST"
           
-          if kubectl get secret hello-world-python-tls -n default &> /dev/null; then
+          if kubectl get secret demo-turbo-instana-concert-tls -n demo-turbo-instana-concert &> /dev/null; then
             echo "✓ TLS secret already exists"
           else
             echo "Creating self-signed TLS certificate..."
             openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
               -keyout $WORKSPACE_DIR/tls.key -out $WORKSPACE_DIR/tls.crt \
-              -subj "/CN=${INGRESS_HOST}/O=IBM Bob Secure Development" \
+              -subj "/CN=${INGRESS_HOST}/O=Demo Turbo Instana Concert" \
               2>/dev/null
             
-            # Create Kubernetes TLS secret
-            kubectl create secret tls hello-world-python-tls \
+            kubectl create secret tls demo-turbo-instana-concert-tls \
               --cert=$WORKSPACE_DIR/tls.crt \
               --key=$WORKSPACE_DIR/tls.key \
-              -n default
+              -n demo-turbo-instana-concert
             
             rm -f $WORKSPACE_DIR/tls.key $WORKSPACE_DIR/tls.crt
             echo "✓ TLS certificate created for: $INGRESS_HOST"
           fi
 
-      # Step 15: Deploy Flexible Ingress (HTTP + HTTPS)
-      - name: Deploy Flexible Ingress
+      # Step 17: Deploy Ingress
+      - name: Deploy Ingress
         run: |
-          # Use INGRESS_HOST from secrets (validated in Step 0)
-          INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
-          echo "✓ Deploying ingress for: $INGRESS_HOST"
-          
-          # Deploy flexible ingress that accepts both HTTP and HTTPS
-          cat <<EOFINGRESS | kubectl apply -f -
-          apiVersion: networking.k8s.io/v1
-          kind: Ingress
-          metadata:
-            name: hello-world-python-ingress
-            namespace: default
-            labels:
-              app: hello-world-python
+          echo "Deploying Ingress..."
+          sed -e "s|\${INGRESS_HOST}|${{ secrets.INGRESS_HOST }}|g" \
+              $WORKSPACE_DIR/k8s/ingress.yaml | kubectl apply -f -
+          echo "✓ Ingress deployed"
             annotations:
               # Accept both HTTP and HTTPS traffic
               traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
@@ -615,19 +646,17 @@ jobs:
           echo "  - HTTP access:  http://${INGRESS_HOST}"
           echo "  - HTTPS access: https://${INGRESS_HOST}"
 
-      # Step 16: Apply Permissive Network Policy
-      - name: Apply Permissive Network Policy
+      # Step 18: Apply Network Policy
+      - name: Apply Network Policy
         run: |
           cat <<'EOFNETPOL' | kubectl apply -f -
           apiVersion: networking.k8s.io/v1
           kind: NetworkPolicy
           metadata:
-            name: hello-world-python-netpol
-            namespace: default
+            name: demo-turbo-instana-concert-netpol
+            namespace: demo-turbo-instana-concert
           spec:
-            podSelector:
-              matchLabels:
-                app: hello-world-python
+            podSelector: {}
             policyTypes:
             - Ingress
             - Egress
@@ -638,27 +667,33 @@ jobs:
           EOFNETPOL
           echo "✓ Network policy applied"
 
-      # Step 17: Get Deployment Info
+      # Step 19: Get Deployment Info
       - name: Get Deployment Info
         run: |
-          # Use INGRESS_HOST from secrets, fallback to default if not set
           INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
-          if [ -z "$INGRESS_HOST" ]; then
-            INGRESS_HOST="hello-world-python.lab.allwaysbeginner.com"
-          fi
-          
-          # Get cluster IP for /etc/hosts
-          CLUSTER_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "<K3S_IP>")
+          CLUSTER_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "<K8S_IP>")
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
           
           echo "==================================="
           echo "Deployment Information"
           echo "==================================="
-          kubectl get deployment hello-world-python -n default
-          kubectl get pods -l app=hello-world-python -n default
-          kubectl get service hello-world-python -n default
-          kubectl get ingress hello-world-python-ingress -n default
           echo ""
-          echo "🌐 Access URLs (Both HTTP and HTTPS work):"
+          echo "Namespace: demo-turbo-instana-concert"
+          echo ""
+          echo "Java Echo Service:"
+          kubectl get deployment vulnerable-echo-service -n demo-turbo-instana-concert
+          kubectl get pods -l app=vulnerable-echo-service -n demo-turbo-instana-concert
+          kubectl get service vulnerable-echo-service -n demo-turbo-instana-concert
+          echo ""
+          echo "Python Load Test App:"
+          kubectl get deployment load-test-app -n demo-turbo-instana-concert
+          kubectl get pods -l app=load-test-app -n demo-turbo-instana-concert
+          kubectl get service load-test-service -n demo-turbo-instana-concert
+          echo ""
+          echo "Ingress:"
+          kubectl get ingress -n demo-turbo-instana-concert
+          echo ""
+          echo "🌐 Access URLs:"
           echo "  HTTP:  http://${INGRESS_HOST}"
           echo "  HTTPS: https://${INGRESS_HOST} (self-signed cert)"
           echo ""
@@ -666,23 +701,19 @@ jobs:
           echo "  ${CLUSTER_IP}  ${INGRESS_HOST}"
           echo ""
           echo "🧪 Test Commands:"
-          echo "  # HTTP"
-          echo "  curl http://${INGRESS_HOST}"
+          echo "  # Health check"
+          echo "  curl http://${INGRESS_HOST}/health"
           echo ""
-          echo "  # HTTPS (ignore self-signed cert warning)"
-          echo "  curl -k https://${INGRESS_HOST}"
+          echo "  # Echo service"
+          echo "  curl http://${INGRESS_HOST}/api/echo"
           echo ""
-          echo "🔑 Gitea Secrets Used:"
-          echo "  - GIT_REGISTRY: ${{ secrets.GIT_REGISTRY }}"
-          echo "  - GIT_USERNAME: ${{ secrets.GIT_USERNAME }}"
-          echo "  - INGRESS_HOST: ${INGRESS_HOST}"
-          echo "  - Image: ${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest"
+          echo "  # Load test endpoints"
+          echo "  curl http://${INGRESS_HOST}/stress"
+          echo "  curl http://${INGRESS_HOST}/metrics"
           echo ""
-          echo "📝 Ingress Configuration:"
-          echo "  - Type: Flexible (HTTP + HTTPS)"
-          echo "  - HTTP Redirect: Disabled (both protocols work)"
-          echo "  - TLS: Optional (works with or without cert)"
-          echo "  - Compatible: Traefik and Nginx ingress controllers"
+          echo "🔑 Images Built:"
+          echo "  - ${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service:latest"
+          echo "  - ${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app:latest"
           echo "==================================="
 
 # Made with Bob
