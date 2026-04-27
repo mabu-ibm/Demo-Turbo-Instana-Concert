@@ -88,7 +88,7 @@ jobs:
 
       # Step 1: Checkout code
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: https://${{ secrets.GIT_REGISTRY }}/actions/checkout@v3
 
       # Step 2: Install Docker
       - name: Install Docker
