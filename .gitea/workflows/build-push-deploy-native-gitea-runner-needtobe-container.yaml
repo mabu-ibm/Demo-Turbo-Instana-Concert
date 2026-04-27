@@ -89,9 +89,29 @@ jobs:
       # Step 1: Checkout code
       - name: Checkout code
         run: |
-          echo "Code is already checked out by Gitea Actions runner"
+          echo "Checking out code..."
           echo "Working directory: $(pwd)"
-          ls -la
+          
+          # Check if code is already present
+          if [ -d "java-app" ] && [ -d "python-app" ]; then
+            echo "✓ Code already checked out"
+            ls -la
+          else
+            echo "Code not found, cloning repository..."
+            # Clone the repository
+            git clone ${{ gitea.server_url }}/${{ gitea.repository }}.git repo
+            cd repo
+            git checkout ${{ gitea.ref_name }}
+            
+            # Move contents to workspace
+            mv * ../ 2>/dev/null || true
+            mv .* ../ 2>/dev/null || true
+            cd ..
+            rm -rf repo
+            
+            echo "✓ Repository cloned"
+            ls -la
+          fi
 
       # Step 2: Install Docker
       - name: Install Docker
