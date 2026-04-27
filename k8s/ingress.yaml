@@ -1,20 +1,30 @@
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
-  name: load-test-ingress
-  namespace: load-testing
+  name: demo-turbo-instana-concert-ingress
+  namespace: demo-turbo-instana-concert
   labels:
-    app: load-test-ingress
+    app: demo-turbo-instana-concert
     component: routing
   annotations:
+    # Accept both HTTP and HTTPS traffic
+    traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+    traefik.ingress.kubernetes.io/router.tls: "true"
+    
+    # Nginx compatibility
     nginx.ingress.kubernetes.io/ssl-redirect: "false"
     nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     nginx.ingress.kubernetes.io/proxy-body-size: "10m"
 spec:
   ingressClassName: nginx
+  tls:
+  - hosts:
+    - ${INGRESS_HOST}
+    secretName: demo-turbo-instana-concert-tls
   rules:
-  - http:
+  - host: ${INGRESS_HOST}
+    http:
       paths:
       # Load Test App routes
       - path: /stress

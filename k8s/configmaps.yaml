@@ -3,7 +3,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: load-test-config
-  namespace: load-testing
+  namespace: demo-turbo-instana-concert
 data:
   PORT: "8080"
   HOST: "0.0.0.0"
@@ -17,7 +17,7 @@ apiVersion: v1
 kind: ConfigMap
 metadata:
   name: vulnerable-echo-config
-  namespace: load-testing
+  namespace: demo-turbo-instana-concert
 data:
   SERVER_PORT: "8085"
   JAVA_OPTS: "-Xmx512m -Xms256m -Dlog4j.configurationFile=/app/log4j2.xml"

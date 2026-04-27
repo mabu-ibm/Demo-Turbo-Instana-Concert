@@ -1,0 +1,675 @@
+name: Build, Push and Deploy (Native)
+
+on:
+  push:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build-push-deploy-native:
+    runs-on: ubuntu-latest
+    env:
+      WORKSPACE_DIR: ${{ github.workspace }}
+    steps:
+      # Step 0: Validate Required Secrets
+      - name: Validate Required Secrets
+        run: |
+          echo "Validating required Gitea secrets..."
+          MISSING_SECRETS=""
+          
+          # Check required secrets
+          if [ -z "${{ secrets.GIT_REGISTRY }}" ]; then
+            echo "❌ Missing secret: GIT_REGISTRY"
+            MISSING_SECRETS="${MISSING_SECRETS}GIT_REGISTRY "
+          else
+            echo "✓ GIT_REGISTRY is set"
+          fi
+          
+          if [ -z "${{ secrets.GIT_USERNAME }}" ]; then
+            echo "❌ Missing secret: GIT_USERNAME"
+            MISSING_SECRETS="${MISSING_SECRETS}GIT_USERNAME "
+          else
+            echo "✓ GIT_USERNAME is set"
+          fi
+          
+          if [ -z "${{ secrets.GIT_TOKEN }}" ]; then
+            echo "❌ Missing secret: GIT_TOKEN"
+            MISSING_SECRETS="${MISSING_SECRETS}GIT_TOKEN "
+          else
+            echo "✓ GIT_TOKEN is set"
+          fi
+          
+          if [ -z "${{ secrets.KUBECONFIG }}" ]; then
+            echo "❌ Missing secret: KUBECONFIG"
+            MISSING_SECRETS="${MISSING_SECRETS}KUBECONFIG "
+          else
+            echo "✓ KUBECONFIG is set"
+          fi
+          
+          if [ -z "${{ secrets.INGRESS_HOST }}" ]; then
+            echo "❌ Missing secret: INGRESS_HOST"
+            MISSING_SECRETS="${MISSING_SECRETS}INGRESS_HOST "
+          else
+            echo "✓ INGRESS_HOST is set: ${{ secrets.INGRESS_HOST }}"
+          fi
+          
+          # Fail if required secrets are missing
+          if [ -n "$MISSING_SECRETS" ]; then
+            echo ""
+            echo "============================================"
+            echo "❌ WORKFLOW FAILED: Missing Required Secrets"
+            echo "============================================"
+            echo ""
+            echo "Missing secrets: ${MISSING_SECRETS}"
+            echo ""
+            echo "Please add these secrets in Gitea:"
+            echo "  Repository → Settings → Secrets → Actions"
+            echo ""
+            echo "Required secrets:"
+            echo "  - GIT_REGISTRY: Registry URL (e.g., almabuild2.lab.allwaysbeginner.com:5000)"
+            echo "  - GIT_USERNAME: Registry username"
+            echo "  - GIT_TOKEN: Registry password/token"
+            echo "  - KUBECONFIG: Kubernetes config (base64 encoded or plain text)"
+            echo "  - INGRESS_HOST: Hostname for ingress (e.g., hello-world-python.lab.allwaysbeginner.com)"
+            echo ""
+            echo "Example values:"
+            echo "  GIT_REGISTRY=almabuild2.lab.allwaysbeginner.com:5000"
+            echo "  GIT_USERNAME=gitea-user"
+            echo "  GIT_TOKEN=your-gitea-token"
+            echo "  INGRESS_HOST=hello-world-python.lab.allwaysbeginner.com"
+            echo "  KUBECONFIG=<base64-encoded-kubeconfig>"
+            echo ""
+            exit 1
+          fi
+          
+          echo ""
+          echo "✅ All required secrets are configured"
+          echo "============================================"
+
+      # Step 1: Checkout code
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Docker
+      - name: Install Docker
+        run: |
+          echo "Installing Docker..."
+          
+          # Detect if we have sudo or running as root
+          if command -v sudo &> /dev/null; then
+            SUDO="sudo"
+          elif [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+            echo "Running as root, sudo not needed"
+          else
+            SUDO=""
+            echo "⚠️  Warning: No sudo available and not running as root"
+          fi
+          
+          # Check if Docker is already installed
+          if command -v docker &> /dev/null; then
+            echo "✓ Docker is already installed"
+            docker --version
+          else
+            echo "Installing Docker from official repository..."
+            
+            # Detect package manager
+            if command -v yum &> /dev/null; then
+              PKG_MGR="yum"
+            elif command -v apt-get &> /dev/null; then
+              PKG_MGR="apt-get"
+            elif command -v apk &> /dev/null; then
+              PKG_MGR="apk"
+            else
+              echo "❌ No supported package manager found (yum, apt-get, apk)"
+              exit 1
+            fi
+            
+            echo "Using package manager: $PKG_MGR"
+            
+            # Install based on package manager
+            if [ "$PKG_MGR" = "yum" ]; then
+              # RHEL/CentOS/AlmaLinux
+              $SUDO yum install -y yum-utils device-mapper-persistent-data lvm2
+              $SUDO yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo
+              $SUDO yum install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              
+            elif [ "$PKG_MGR" = "apt-get" ]; then
+              # Debian/Ubuntu - detect which one
+              if [ -f /etc/os-release ]; then
+                . /etc/os-release
+                OS_ID="$ID"
+              else
+                OS_ID="ubuntu"
+              fi
+              
+              echo "Detected OS: $OS_ID"
+              
+              # Install prerequisites
+              $SUDO apt-get update
+              $SUDO apt-get install -y ca-certificates curl gnupg lsb-release
+              
+              # Create keyrings directory
+              $SUDO install -m 0755 -d /etc/apt/keyrings
+              
+              # Add Docker's official GPG key and repository based on OS
+              if [ "$OS_ID" = "debian" ]; then
+                # Debian
+                curl -fsSL https://download.docker.com/linux/debian/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+              else
+                # Ubuntu
+                curl -fsSL https://download.docker.com/linux/ubuntu/gpg | $SUDO gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+                $SUDO chmod a+r /etc/apt/keyrings/docker.gpg
+                echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | $SUDO tee /etc/apt/sources.list.d/docker.list > /dev/null
+              fi
+              
+              # Update and install Docker
+              $SUDO apt-get update
+              $SUDO apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+              
+            elif [ "$PKG_MGR" = "apk" ]; then
+              # Alpine Linux
+              $SUDO apk add --no-cache docker docker-cli docker-compose
+            fi
+            
+            # Start Docker service (if systemctl available)
+            if command -v systemctl &> /dev/null; then
+              $SUDO systemctl start docker 2>/dev/null || true
+              $SUDO systemctl enable docker 2>/dev/null || true
+            fi
+            
+            # Start Docker daemon if not running (for non-systemd systems)
+            if ! pgrep dockerd > /dev/null; then
+              if [ -z "$SUDO" ]; then
+                dockerd > /dev/null 2>&1 &
+              else
+                $SUDO dockerd > /dev/null 2>&1 &
+              fi
+              sleep 3
+            fi
+            
+            # Add current user to docker group (if not root)
+            if [ "$(id -u)" -ne 0 ] && [ -n "$SUDO" ]; then
+              $SUDO usermod -aG docker $(whoami) 2>/dev/null || true
+            fi
+            
+            # Verify installation
+            docker --version
+            echo "✓ Docker installed successfully"
+          fi
+          
+          # Ensure Docker socket permissions
+          if [ -S /var/run/docker.sock ]; then
+            $SUDO chmod 666 /var/run/docker.sock 2>/dev/null || chmod 666 /var/run/docker.sock 2>/dev/null || true
+          fi
+          
+          # Test Docker
+          docker info
+          echo "✓ Docker is working"
+
+      # Step 3: Install kubectl
+      - name: Install kubectl
+        run: |
+          echo "Installing kubectl..."
+          
+          # Detect if we have sudo or running as root
+          if command -v sudo &> /dev/null; then
+            SUDO="sudo"
+          elif [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+            echo "Running as root, sudo not needed"
+          else
+            SUDO=""
+            echo "⚠️  Warning: No sudo available and not running as root"
+          fi
+          
+          # Check if kubectl is already installed
+          if command -v kubectl &> /dev/null; then
+            echo "✓ kubectl is already installed"
+            kubectl version --client
+          else
+            echo "Installing kubectl from official repository..."
+            
+            # Download latest stable kubectl
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl"
+            
+            # Verify the binary (optional)
+            curl -LO "https://dl.k8s.io/release/$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl.sha256"
+            echo "$(cat kubectl.sha256)  kubectl" | sha256sum --check
+            
+            # Install kubectl
+            if [ -n "$SUDO" ]; then
+              $SUDO install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl
+            else
+              # If no sudo, try to install to user's local bin or current directory
+              if [ -w /usr/local/bin ]; then
+                install -m 0755 kubectl /usr/local/bin/kubectl
+              elif [ -d "$HOME/.local/bin" ]; then
+                mkdir -p "$HOME/.local/bin"
+                install -m 0755 kubectl "$HOME/.local/bin/kubectl"
+                export PATH="$HOME/.local/bin:$PATH"
+              else
+                install -m 0755 kubectl ./kubectl
+                export PATH="$(pwd):$PATH"
+              fi
+            fi
+            
+            # Clean up
+            rm -f kubectl.sha256
+            
+            # Verify installation
+            kubectl version --client
+            echo "✓ kubectl installed successfully"
+          fi
+
+      # Step 4: Verify Docker is available
+      - name: Verify Docker
+        run: |
+          echo "Checking for Docker..."
+          echo "Current user: $(whoami)"
+          echo "Current groups: $(groups)"
+          echo "PATH: $PATH"
+          echo ""
+          
+          # Debug: Check if files exist
+          echo "Checking file existence:"
+          ls -la /usr/bin/docker 2>&1 || echo "/usr/bin/docker not found"
+          ls -la /usr/local/bin/docker 2>&1 || echo "/usr/local/bin/docker not found"
+          ls -la /bin/docker 2>&1 || echo "/bin/docker not found"
+          echo ""
+          
+          # Try to find docker using which
+          echo "Trying 'which docker':"
+          which docker 2>&1 || echo "docker not in PATH"
+          echo ""
+          
+          # Try common Docker locations
+          DOCKER_BIN=""
+          for path in /usr/bin/docker /usr/local/bin/docker /bin/docker; do
+            echo "Checking: $path"
+            if [ -f "$path" ]; then
+              echo "  File exists: yes"
+              if [ -x "$path" ]; then
+                echo "  Executable: yes"
+                DOCKER_BIN="$path"
+                break
+              else
+                echo "  Executable: no (permissions: $(stat -c '%a' $path 2>/dev/null || stat -f '%p' $path))"
+              fi
+            else
+              echo "  File exists: no"
+            fi
+          done
+          echo ""
+          
+          if [ -z "$DOCKER_BIN" ]; then
+            echo "❌ ERROR: Docker binary not found or not executable!"
+            echo ""
+            echo "Debug info:"
+            echo "  - Check if Docker is installed: rpm -qa | grep docker"
+            echo "  - Check Docker service: systemctl status docker"
+            echo "  - Check runner user: whoami"
+            echo "  - Check runner groups: groups"
+            exit 1
+          fi
+          
+          echo "Found Docker at: $DOCKER_BIN"
+          $DOCKER_BIN --version
+          $DOCKER_BIN info
+          echo "✓ Docker is available and working"
+
+      # Step 5: Verify kubectl is available
+      - name: Verify kubectl
+        run: |
+          echo "Checking for kubectl..."
+          
+          # Try common kubectl locations
+          KUBECTL_BIN=""
+          for path in /usr/local/bin/kubectl /usr/bin/kubectl /bin/kubectl; do
+            if [ -x "$path" ]; then
+              KUBECTL_BIN="$path"
+              break
+            fi
+          done
+          
+          if [ -z "$KUBECTL_BIN" ]; then
+            echo "❌ ERROR: kubectl binary not found!"
+            echo "Searched locations: /usr/local/bin/kubectl, /usr/bin/kubectl, /bin/kubectl"
+            echo ""
+            echo "Please install kubectl on the runner host:"
+            echo "  curl -LO 'https://dl.k8s.io/release/\$(curl -L -s https://dl.k8s.io/release/stable.txt)/bin/linux/amd64/kubectl'"
+            echo "  sudo install -o root -g root -m 0755 kubectl /usr/local/bin/kubectl"
+            exit 1
+          fi
+          
+          echo "Found kubectl at: $KUBECTL_BIN"
+          $KUBECTL_BIN version --client
+          echo "✓ kubectl is available and working"
+
+      # Step 6: Configure Docker for HTTP Registry
+      - name: Configure Docker for HTTP Registry
+        run: |
+          echo "Configuring Docker to allow insecure registry..."
+          
+          # Detect if we have sudo or running as root
+          if command -v sudo &> /dev/null; then
+            SUDO="sudo"
+          elif [ "$(id -u)" -eq 0 ]; then
+            SUDO=""
+          else
+            SUDO=""
+          fi
+          
+          # Create or update Docker daemon.json
+          DAEMON_JSON="/etc/docker/daemon.json"
+          REGISTRY="${{ secrets.GIT_REGISTRY }}"
+          
+          # Backup existing config if it exists
+          if [ -f "$DAEMON_JSON" ]; then
+            $SUDO cp "$DAEMON_JSON" "${DAEMON_JSON}.backup" 2>/dev/null || cp "$DAEMON_JSON" "${DAEMON_JSON}.backup" 2>/dev/null || true
+          fi
+          
+          # Create daemon.json with insecure-registries
+          echo "Creating/updating daemon.json..."
+          $SUDO mkdir -p /etc/docker 2>/dev/null || mkdir -p /etc/docker 2>/dev/null || true
+          
+          # Create the JSON content using echo
+          $SUDO bash -c "echo '{' > $DAEMON_JSON" || bash -c "echo '{' > $DAEMON_JSON"
+          $SUDO bash -c "echo '  \"insecure-registries\": [\"${REGISTRY}\"]' >> $DAEMON_JSON" || bash -c "echo '  \"insecure-registries\": [\"${REGISTRY}\"]' >> $DAEMON_JSON"
+          $SUDO bash -c "echo '}' >> $DAEMON_JSON" || bash -c "echo '}' >> $DAEMON_JSON"
+          
+          echo "✓ Docker daemon.json configured"
+          cat "$DAEMON_JSON"
+          
+          # Restart Docker to apply changes
+          echo "Restarting Docker daemon..."
+          if command -v systemctl &> /dev/null; then
+            $SUDO systemctl restart docker || true
+            sleep 5
+            $SUDO systemctl status docker --no-pager || true
+          else
+            echo "⚠️  systemctl not available, Docker may need manual restart"
+          fi
+          
+          echo "✓ Docker configured for HTTP registry: ${REGISTRY}"
+
+      # Step 7: Login to Registry
+      - name: Login to Gitea Registry
+        run: |
+          echo "${{ secrets.GIT_TOKEN }}" | docker login ${{ secrets.GIT_REGISTRY }} \
+            --username ${{ secrets.GIT_USERNAME }} \
+            --password-stdin
+          echo "✓ Logged in to registry"
+
+      # Step 7: Build and Push Docker Image
+      - name: Build and Push
+        run: |
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}"
+          docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} $WORKSPACE_DIR
+          docker push ${IMAGE_NAME}:latest
+          docker push ${IMAGE_NAME}:${{ gitea.sha }}
+          echo "✓ Image pushed successfully"
+
+      # Step 8: Generate SBOM using Syft
+      - name: Generate SBOM with Syft
+        run: |
+          # Check if syft is installed, if not use container
+          if command -v syft &> /dev/null; then
+            syft "${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest" \
+              -o spdx-json=$WORKSPACE_DIR/sbom.json \
+              -o cyclonedx-json=$WORKSPACE_DIR/sbom-cyclonedx.json
+          else
+            echo "Syft not installed, using container..."
+            docker run --rm \
+              --user $(id -u):$(id -g) \
+              -v /var/run/docker.sock:/var/run/docker.sock \
+              -v "$WORKSPACE_DIR:/output" \
+              -w /output \
+              anchore/syft:latest \
+              "${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest" \
+              -o spdx-json=/output/sbom.json \
+              -o cyclonedx-json=/output/sbom-cyclonedx.json
+          fi
+          
+          echo "✓ SBOM generated"
+          # Verify SBOM files exist (use test instead of ls for better compatibility)
+          if [ -f "$WORKSPACE_DIR/sbom.json" ] && [ -f "$WORKSPACE_DIR/sbom-cyclonedx.json" ]; then
+            echo "SBOM files created successfully:"
+            echo "  - sbom.json ($(stat -f%z "$WORKSPACE_DIR/sbom.json" 2>/dev/null || stat -c%s "$WORKSPACE_DIR/sbom.json" 2>/dev/null || echo 'unknown') bytes)"
+            echo "  - sbom-cyclonedx.json ($(stat -f%z "$WORKSPACE_DIR/sbom-cyclonedx.json" 2>/dev/null || stat -c%s "$WORKSPACE_DIR/sbom-cyclonedx.json" 2>/dev/null || echo 'unknown') bytes)"
+          else
+            echo "⚠️  Warning: SBOM files may not have been created"
+          fi
+
+      # Step 9: Upload SBOM to Concert (Optional)
+      - name: Upload SBOM to Concert
+        if: secrets.CONCERT_URL != ''
+        continue-on-error: true
+        env:
+          CONCERT_URL: ${{ secrets.CONCERT_URL }}
+          CONCERT_API_KEY: ${{ secrets.CONCERT_API_KEY }}
+          CONCERT_INSTANCE_ID: ${{ secrets.CONCERT_INSTANCE_ID }}
+          CONCERT_APPLICATION_ID: ${{ secrets.CONCERT_APPLICATION_ID }}
+        run: |
+          pip3 install requests
+          python3 $WORKSPACE_DIR/scripts/upload-sbom-to-concert.py $WORKSPACE_DIR/sbom.json --application-id "${CONCERT_APPLICATION_ID}" || echo "⚠ Concert upload skipped"
+
+      # Step 10: Upload SBOM Artifacts
+      - name: Upload SBOM Artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom-files
+          path: |
+            sbom.json
+            sbom-cyclonedx.json
+          retention-days: 90
+
+      # Step 11: Setup kubeconfig
+      - name: Setup kubeconfig
+        run: |
+          mkdir -p $HOME/.kube
+          
+          # Decode kubeconfig if base64, otherwise use as-is
+          if echo "${{ secrets.KUBECONFIG }}" | base64 -d > /dev/null 2>&1; then
+            echo "${{ secrets.KUBECONFIG }}" | base64 -d > $HOME/.kube/config
+            echo "✓ Decoded base64 kubeconfig"
+          else
+            echo "${{ secrets.KUBECONFIG }}" > $HOME/.kube/config
+            echo "✓ Used plain text kubeconfig"
+          fi
+          
+          chmod 600 $HOME/.kube/config
+          
+          # Verify kubectl can connect
+          kubectl cluster-info
+          echo "✓ kubectl configured and connected"
+
+      # Step 12: Clean Up Existing Resources
+      - name: Clean Up Existing Resources
+        run: |
+          echo "Cleaning up existing resources for fresh deployment..."
+          
+          # Delete existing ingress
+          kubectl delete ingress hello-world-python-ingress -n default --ignore-not-found=true
+          echo "✓ Ingress deleted (if existed)"
+          
+          # Delete existing deployment and service
+          kubectl delete deployment hello-world-python -n default --ignore-not-found=true
+          kubectl delete service hello-world-python -n default --ignore-not-found=true
+          echo "✓ Deployment and service deleted (if existed)"
+          
+          # Delete existing TLS secret (will be recreated)
+          kubectl delete secret hello-world-python-tls -n default --ignore-not-found=true
+          echo "✓ TLS secret deleted (if existed)"
+          
+          # Wait a moment for resources to be fully deleted
+          sleep 5
+          
+          echo "✓ Cleanup complete - ready for fresh deployment"
+
+      # Step 13: Deploy Application
+      - name: Deploy Application
+        run: |
+          # Replace variables in deployment.yaml with actual values from secrets
+          sed -e "s|\${IMAGE_REGISTRY}|${{ secrets.GIT_REGISTRY }}|g" \
+              -e "s|\${IMAGE_REPOSITORY}|${{ gitea.repository }}|g" \
+              -e "s|\${IMAGE_TAG}|latest|g" \
+              $WORKSPACE_DIR/k8s/deployment.yaml | kubectl apply -f -
+          
+          kubectl rollout status deployment/hello-world-python -n default --timeout=5m
+          echo "✓ Application deployed"
+
+      # Step 14: Create TLS Certificate
+      - name: Create TLS Certificate
+        run: |
+          # Use INGRESS_HOST from secrets (validated in Step 0)
+          INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
+          echo "Creating TLS certificate for: $INGRESS_HOST"
+          
+          if kubectl get secret hello-world-python-tls -n default &> /dev/null; then
+            echo "✓ TLS secret already exists"
+          else
+            echo "Creating self-signed TLS certificate..."
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+              -keyout $WORKSPACE_DIR/tls.key -out $WORKSPACE_DIR/tls.crt \
+              -subj "/CN=${INGRESS_HOST}/O=IBM Bob Secure Development" \
+              2>/dev/null
+            
+            # Create Kubernetes TLS secret
+            kubectl create secret tls hello-world-python-tls \
+              --cert=$WORKSPACE_DIR/tls.crt \
+              --key=$WORKSPACE_DIR/tls.key \
+              -n default
+            
+            rm -f $WORKSPACE_DIR/tls.key $WORKSPACE_DIR/tls.crt
+            echo "✓ TLS certificate created for: $INGRESS_HOST"
+          fi
+
+      # Step 15: Deploy Flexible Ingress (HTTP + HTTPS)
+      - name: Deploy Flexible Ingress
+        run: |
+          # Use INGRESS_HOST from secrets (validated in Step 0)
+          INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
+          echo "✓ Deploying ingress for: $INGRESS_HOST"
+          
+          # Deploy flexible ingress that accepts both HTTP and HTTPS
+          cat <<EOFINGRESS | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: Ingress
+          metadata:
+            name: hello-world-python-ingress
+            namespace: default
+            labels:
+              app: hello-world-python
+            annotations:
+              # Accept both HTTP and HTTPS traffic
+              traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
+              
+              # Optional TLS - works with or without certificate
+              traefik.ingress.kubernetes.io/router.tls: "true"
+              
+              # DO NOT redirect HTTP to HTTPS - allow both
+              # traefik.ingress.kubernetes.io/redirect-entry-point: https  # COMMENTED OUT
+              
+              # Nginx compatibility (if cluster uses nginx instead of traefik)
+              nginx.ingress.kubernetes.io/ssl-redirect: "false"
+              nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
+              
+              # Allow insecure backend
+              nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+          spec:
+            # TLS configuration - optional, works without certificate
+            tls:
+            - hosts:
+              - ${INGRESS_HOST}
+              secretName: hello-world-python-tls
+            rules:
+            - host: ${INGRESS_HOST}
+              http:
+                paths:
+                - path: /
+                  pathType: Prefix
+                  backend:
+                    service:
+                      name: hello-world-python
+                      port:
+                        number: 80
+          EOFINGRESS
+          
+          echo "✓ Flexible ingress deployed for host: $INGRESS_HOST"
+          echo "  - HTTP access:  http://${INGRESS_HOST}"
+          echo "  - HTTPS access: https://${INGRESS_HOST}"
+
+      # Step 16: Apply Permissive Network Policy
+      - name: Apply Permissive Network Policy
+        run: |
+          cat <<'EOFNETPOL' | kubectl apply -f -
+          apiVersion: networking.k8s.io/v1
+          kind: NetworkPolicy
+          metadata:
+            name: hello-world-python-netpol
+            namespace: default
+          spec:
+            podSelector:
+              matchLabels:
+                app: hello-world-python
+            policyTypes:
+            - Ingress
+            - Egress
+            ingress:
+            - {}
+            egress:
+            - {}
+          EOFNETPOL
+          echo "✓ Network policy applied"
+
+      # Step 17: Get Deployment Info
+      - name: Get Deployment Info
+        run: |
+          # Use INGRESS_HOST from secrets, fallback to default if not set
+          INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
+          if [ -z "$INGRESS_HOST" ]; then
+            INGRESS_HOST="hello-world-python.lab.allwaysbeginner.com"
+          fi
+          
+          # Get cluster IP for /etc/hosts
+          CLUSTER_IP=$(kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' 2>/dev/null || echo "<K3S_IP>")
+          
+          echo "==================================="
+          echo "Deployment Information"
+          echo "==================================="
+          kubectl get deployment hello-world-python -n default
+          kubectl get pods -l app=hello-world-python -n default
+          kubectl get service hello-world-python -n default
+          kubectl get ingress hello-world-python-ingress -n default
+          echo ""
+          echo "🌐 Access URLs (Both HTTP and HTTPS work):"
+          echo "  HTTP:  http://${INGRESS_HOST}"
+          echo "  HTTPS: https://${INGRESS_HOST} (self-signed cert)"
+          echo ""
+          echo "📋 Add to /etc/hosts on your machine:"
+          echo "  ${CLUSTER_IP}  ${INGRESS_HOST}"
+          echo ""
+          echo "🧪 Test Commands:"
+          echo "  # HTTP"
+          echo "  curl http://${INGRESS_HOST}"
+          echo ""
+          echo "  # HTTPS (ignore self-signed cert warning)"
+          echo "  curl -k https://${INGRESS_HOST}"
+          echo ""
+          echo "🔑 Gitea Secrets Used:"
+          echo "  - GIT_REGISTRY: ${{ secrets.GIT_REGISTRY }}"
+          echo "  - GIT_USERNAME: ${{ secrets.GIT_USERNAME }}"
+          echo "  - INGRESS_HOST: ${INGRESS_HOST}"
+          echo "  - Image: ${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}:latest"
+          echo ""
+          echo "📝 Ingress Configuration:"
+          echo "  - Type: Flexible (HTTP + HTTPS)"
+          echo "  - HTTP Redirect: Disabled (both protocols work)"
+          echo "  - TLS: Optional (works with or without cert)"
+          echo "  - Compatible: Traefik and Nginx ingress controllers"
+          echo "==================================="
+
+# Made with Bob

@@ -2,41 +2,42 @@
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: load-testing
+  name: demo-turbo-instana-concert
   labels:
-    name: load-testing
-    app.kubernetes.io/name: load-testing
-    security.policy.io/isolation: test-environment
+    name: demo-turbo-instana-concert
+    app.kubernetes.io/name: demo-turbo-instana-concert
+    app.kubernetes.io/component: observability-demo
+    security.policy.io/isolation: demo-environment
 
 ---
 apiVersion: v1
 kind: ServiceAccount
 metadata:
-  name: load-test-app-sa
-  namespace: load-testing
+  name: demo-turbo-instana-concert-sa
+  namespace: demo-turbo-instana-concert
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
-  name: load-test-app-reader
-  namespace: load-testing
+  name: demo-turbo-instana-concert-reader
+  namespace: demo-turbo-instana-concert
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
+    resources: ["pods", "services", "configmaps"]
     verbs: ["get", "list", "watch"]
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
-  name: load-test-app-reader-binding
-  namespace: load-testing
+  name: demo-turbo-instana-concert-reader-binding
+  namespace: demo-turbo-instana-concert
 subjects:
   - kind: ServiceAccount
-    name: load-test-app-sa
-    namespace: load-testing
+    name: demo-turbo-instana-concert-sa
+    namespace: demo-turbo-instana-concert
 roleRef:
   kind: Role
-  name: load-test-app-reader
+  name: demo-turbo-instana-concert-reader
   apiGroup: rbac.authorization.k8s.io
 
 ---
@@ -45,9 +46,9 @@ apiVersion: v1
 kind: Secret
 metadata:
   name: app-secrets
-  namespace: load-testing
+  namespace: demo-turbo-instana-concert
 type: Opaque
 data:
-  database-user: bG9hZHRlc3Q=
-  database-password: cGFzc3dvcmQ=
-  api-key: dGVzdC1hcGkta2V5
+  database-user: ZGVtb3VzZXI=
+  database-password: ZGVtb3Bhc3N3b3Jk
+  api-key: ZGVtby1hcGkta2V5LXR1cmJvLWluc3RhbmE=
