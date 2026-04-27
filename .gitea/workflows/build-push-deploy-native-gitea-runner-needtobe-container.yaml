@@ -401,10 +401,14 @@ jobs:
       # Step 7: Login to Registry
       - name: Login to Gitea Registry
         run: |
-          echo "${{ secrets.GIT_TOKEN }}" | docker login ${{ secrets.GIT_REGISTRY }} \
+          # Wait for Docker daemon to fully restart after config change
+          sleep 3
+          
+          # Login to HTTP registry
+          echo "${{ secrets.GIT_TOKEN }}" | docker login http://${{ secrets.GIT_REGISTRY }} \
             --username ${{ secrets.GIT_USERNAME }} \
             --password-stdin
-          echo "✓ Logged in to registry"
+          echo "✓ Logged in to HTTP registry: ${{ secrets.GIT_REGISTRY }}"
 
       # Step 7: Build and Push Docker Image
       - name: Build and Push
