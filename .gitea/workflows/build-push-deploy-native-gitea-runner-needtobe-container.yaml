@@ -98,14 +98,24 @@ jobs:
             ls -la
           else
             echo "Code not found, cloning repository..."
+            
+            # Extract host from GIT_REGISTRY (remove port if present)
+            GITEA_HOST=$(echo "${{ secrets.GIT_REGISTRY }}" | cut -d':' -f1)
+            GITEA_PORT=$(echo "${{ secrets.GIT_REGISTRY }}" | cut -d':' -f2)
+            
+            # Construct Gitea URL
+            GITEA_URL="http://${GITEA_HOST}:${GITEA_PORT}"
+            
+            echo "Cloning from: ${GITEA_URL}/${{ gitea.repository }}.git"
+            
             # Clone the repository
-            git clone ${{ gitea.server_url }}/${{ gitea.repository }}.git repo
+            git clone "${GITEA_URL}/${{ gitea.repository }}.git" repo
             cd repo
-            git checkout ${{ gitea.ref_name }}
+            git checkout ${{ gitea.ref_name }} || git checkout ${{ gitea.sha }} || true
             
             # Move contents to workspace
+            shopt -s dotglob
             mv * ../ 2>/dev/null || true
-            mv .* ../ 2>/dev/null || true
             cd ..
             rm -rf repo
             
