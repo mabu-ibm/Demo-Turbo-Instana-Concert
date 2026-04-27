@@ -413,11 +413,17 @@ jobs:
       # Step 7: Build and Push Docker Image
       - name: Build and Push
         run: |
-          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${{ gitea.repository }}"
+          # Convert repository name to lowercase for Docker compatibility
+          REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}"
+          
+          echo "Building image: ${IMAGE_NAME}:latest"
           docker build -t ${IMAGE_NAME}:latest -t ${IMAGE_NAME}:${{ gitea.sha }} $WORKSPACE_DIR
+          
+          echo "Pushing images..."
           docker push ${IMAGE_NAME}:latest
           docker push ${IMAGE_NAME}:${{ gitea.sha }}
-          echo "✓ Image pushed successfully"
+          echo "✓ Images pushed successfully"
 
       # Step 8: Generate SBOM using Syft
       - name: Generate SBOM with Syft
