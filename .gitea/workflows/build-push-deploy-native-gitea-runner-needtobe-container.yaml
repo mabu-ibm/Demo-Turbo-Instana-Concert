@@ -88,7 +88,10 @@ jobs:
 
       # Step 1: Checkout code
       - name: Checkout code
-        uses: https://${{ secrets.GIT_REGISTRY }}/actions/checkout@v3
+        run: |
+          echo "Code is already checked out by Gitea Actions runner"
+          echo "Working directory: $(pwd)"
+          ls -la
 
       # Step 2: Install Docker
       - name: Install Docker
