@@ -46,7 +46,7 @@ spec:
       containers:
       - name: vulnerable-echo-service
         image: ${IMAGE_REGISTRY}/${IMAGE_REPOSITORY}:${IMAGE_TAG}
-        imagePullPolicy: Always
+        imagePullPolicy: IfNotPresent
         ports:
         - containerPort: 8085
           name: http

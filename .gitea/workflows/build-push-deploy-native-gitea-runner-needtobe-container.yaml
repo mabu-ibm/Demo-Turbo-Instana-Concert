@@ -582,35 +582,97 @@ jobs:
           kubectl apply -f $WORKSPACE_DIR/k8s/configmaps.yaml
           echo "✓ ConfigMaps applied"
 
-      # Step 14: Deploy Java Echo Service
+      # Step 14: Verify Registry Configuration on Nodes
+      - name: Verify Registry Configuration on Nodes
+        run: |
+          echo "Verifying registry configuration..."
+          REGISTRY="${{ secrets.GIT_REGISTRY }}"
+          
+          echo "Registry to be used: $REGISTRY"
+          echo ""
+          echo "⚠️  IMPORTANT: Ensure Docker daemon on ALL Kubernetes nodes has this configuration:"
+          echo ""
+          cat <<'EOFCONFIG'
+          # /etc/docker/daemon.json
+          {
+            "insecure-registries": ["REGISTRY_ADDRESS"]
+          }
+          EOFCONFIG
+          echo ""
+          echo "Replace REGISTRY_ADDRESS with: $REGISTRY"
+          echo ""
+          echo "After updating daemon.json on each node, restart Docker:"
+          echo "  sudo systemctl restart docker"
+          echo ""
+          echo "Continuing with deployment..."
+
+      # Step 15: Deploy Java Echo Service
       - name: Deploy Java Echo Service
         run: |
           echo "Deploying Java Echo Service..."
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_FULL="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service:latest"
           
+          echo "Image to deploy: $IMAGE_FULL"
+          
+          # Apply deployment with substitutions
           sed -e "s|\${IMAGE_REGISTRY}|${{ secrets.GIT_REGISTRY }}|g" \
               -e "s|\${IMAGE_REPOSITORY}|${REPO_LOWER}/echo-service|g" \
               -e "s|\${IMAGE_TAG}|latest|g" \
               $WORKSPACE_DIR/k8s/echo-service-deployment.yaml | kubectl apply -f -
           
-          kubectl rollout status deployment/vulnerable-echo-service -n demo-turbo-instana-concert --timeout=5m
-          echo "✓ Java Echo Service deployed"
+          echo "Waiting for deployment rollout..."
+          if kubectl rollout status deployment/vulnerable-echo-service -n demo-turbo-instana-concert --timeout=5m; then
+            echo "✓ Java Echo Service deployed successfully"
+          else
+            echo "⚠️  Deployment rollout did not complete in time"
+            echo "Checking pod status..."
+            kubectl get pods -n demo-turbo-instana-concert -l app=vulnerable-echo-service
+            echo ""
+            echo "Checking pod events..."
+            kubectl describe pods -n demo-turbo-instana-concert -l app=vulnerable-echo-service | grep -A 20 "Events:"
+            echo ""
+            echo "If you see ImagePullBackOff errors, ensure:"
+            echo "  1. Registry ${{ secrets.GIT_REGISTRY }} is accessible from cluster"
+            echo "  2. Docker daemon on nodes has insecure-registries configured"
+            echo "  3. Image exists: $IMAGE_FULL"
+            exit 1
+          fi
 
-      # Step 15: Deploy Python Load Test App
+      # Step 16: Deploy Python Load Test App
       - name: Deploy Python Load Test App
         run: |
           echo "Deploying Python Load Test App..."
           REPO_LOWER=$(echo "${{ gitea.repository }}" | tr '[:upper:]' '[:lower:]')
+          IMAGE_FULL="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app:latest"
           
+          echo "Image to deploy: $IMAGE_FULL"
+          
+          # Apply deployment with substitutions
           sed -e "s|\${IMAGE_REGISTRY}|${{ secrets.GIT_REGISTRY }}|g" \
               -e "s|\${IMAGE_REPOSITORY}|${REPO_LOWER}/load-test-app|g" \
               -e "s|\${IMAGE_TAG}|latest|g" \
               $WORKSPACE_DIR/k8s/python-app-deployment.yaml | kubectl apply -f -
           
-          kubectl rollout status deployment/load-test-app -n demo-turbo-instana-concert --timeout=5m
-          echo "✓ Python Load Test App deployed"
+          echo "Waiting for deployment rollout..."
+          if kubectl rollout status deployment/load-test-app -n demo-turbo-instana-concert --timeout=5m; then
+            echo "✓ Python Load Test App deployed successfully"
+          else
+            echo "⚠️  Deployment rollout did not complete in time"
+            echo "Checking pod status..."
+            kubectl get pods -n demo-turbo-instana-concert -l app=load-test-app
+            echo ""
+            echo "Checking pod events..."
+            kubectl describe pods -n demo-turbo-instana-concert -l app=load-test-app | grep -A 20 "Events:"
+            echo ""
+            echo "If you see ImagePullBackOff errors, ensure:"
+            echo "  1. Registry ${{ secrets.GIT_REGISTRY }} is accessible from cluster"
+            echo "  2. Docker daemon on nodes has insecure-registries configured"
+            echo "  3. Image exists: $IMAGE_FULL"
+            exit 1
+          fi
 
-      # Step 16: Create TLS Certificate
+      # Step 17: Create TLS Certificate
       - name: Create TLS Certificate
         run: |
           INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
@@ -634,7 +696,7 @@ jobs:
             echo "✓ TLS certificate created for: $INGRESS_HOST"
           fi
 
-      # Step 17: Deploy Ingress
+      # Step 18: Deploy Ingress
       - name: Deploy Ingress
         run: |
           echo "Deploying Ingress..."
@@ -680,7 +742,7 @@ jobs:
           echo "  - HTTP access:  http://${INGRESS_HOST}"
           echo "  - HTTPS access: https://${INGRESS_HOST}"
 
-      # Step 18: Apply Network Policy
+      # Step 19: Apply Network Policy
       - name: Apply Network Policy
         run: |
           cat <<'EOFNETPOL' | kubectl apply -f -
@@ -701,7 +763,7 @@ jobs:
           EOFNETPOL
           echo "✓ Network policy applied"
 
-      # Step 19: Get Deployment Info
+      # Step 20: Get Deployment Info
       - name: Get Deployment Info
         run: |
           INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
