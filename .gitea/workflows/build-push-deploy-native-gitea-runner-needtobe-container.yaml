@@ -700,45 +700,12 @@ jobs:
       - name: Deploy Ingress
         run: |
           echo "Deploying Ingress..."
-          sed -e "s|\${INGRESS_HOST}|${{ secrets.INGRESS_HOST }}|g" \
-              $WORKSPACE_DIR/k8s/ingress.yaml | kubectl apply -f -
-          echo "✓ Ingress deployed"
-            annotations:
-              # Accept both HTTP and HTTPS traffic
-              traefik.ingress.kubernetes.io/router.entrypoints: web,websecure
-              
-              # Optional TLS - works with or without certificate
-              traefik.ingress.kubernetes.io/router.tls: "true"
-              
-              # DO NOT redirect HTTP to HTTPS - allow both
-              # traefik.ingress.kubernetes.io/redirect-entry-point: https  # COMMENTED OUT
-              
-              # Nginx compatibility (if cluster uses nginx instead of traefik)
-              nginx.ingress.kubernetes.io/ssl-redirect: "false"
-              nginx.ingress.kubernetes.io/force-ssl-redirect: "false"
-              
-              # Allow insecure backend
-              nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
-          spec:
-            # TLS configuration - optional, works without certificate
-            tls:
-            - hosts:
-              - ${INGRESS_HOST}
-              secretName: hello-world-python-tls
-            rules:
-            - host: ${INGRESS_HOST}
-              http:
-                paths:
-                - path: /
-                  pathType: Prefix
-                  backend:
-                    service:
-                      name: hello-world-python
-                      port:
-                        number: 80
-          EOFINGRESS
+          INGRESS_HOST="${{ secrets.INGRESS_HOST }}"
           
-          echo "✓ Flexible ingress deployed for host: $INGRESS_HOST"
+          sed -e "s|\${INGRESS_HOST}|${INGRESS_HOST}|g" \
+              $WORKSPACE_DIR/k8s/ingress.yaml | kubectl apply -f -
+          
+          echo "✓ Ingress deployed for host: ${INGRESS_HOST}"
           echo "  - HTTP access:  http://${INGRESS_HOST}"
           echo "  - HTTPS access: https://${INGRESS_HOST}"
 
