@@ -485,20 +485,39 @@ jobs:
           IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/echo-service"
           
           echo "Generating SBOM for Java Echo Service..."
+          echo "Image: ${IMAGE_NAME}:latest"
           echo "Output will be saved to both workspace and /tmp for upload testing"
           
-          # Create /tmp directory if it doesn't exist
+          # Create output directories
           mkdir -p /tmp/sbom-output
+          mkdir -p "$WORKSPACE_DIR"
+          
+          # Check if image exists
+          if ! docker image inspect "${IMAGE_NAME}:latest" &> /dev/null; then
+            echo "⚠️  Warning: Image ${IMAGE_NAME}:latest not found locally"
+            echo "Attempting to pull image..."
+            docker pull "${IMAGE_NAME}:latest" || {
+              echo "❌ Failed to pull image. SBOM generation skipped."
+              exit 0
+            }
+          fi
+          
+          echo "Image found, generating SBOM..."
           
           if command -v syft &> /dev/null; then
             # Generate SBOM with syft installed on host
+            echo "Using native syft..."
             syft "${IMAGE_NAME}:latest" \
-              -o spdx-json=$WORKSPACE_DIR/sbom-java.json \
-              -o cyclonedx-json=$WORKSPACE_DIR/sbom-java-cyclonedx.json \
-              -o spdx-json=/tmp/sbom-output/sbom-java.json \
-              -o cyclonedx-json=/tmp/sbom-output/sbom-java-cyclonedx.json
+              -o spdx-json="$WORKSPACE_DIR/sbom-java.json" \
+              -o cyclonedx-json="$WORKSPACE_DIR/sbom-java-cyclonedx.json" \
+              -o spdx-json="/tmp/sbom-output/sbom-java.json" \
+              -o cyclonedx-json="/tmp/sbom-output/sbom-java-cyclonedx.json" || {
+              echo "❌ Syft scan failed"
+              exit 1
+            }
           else
             # Generate SBOM using Docker container
+            echo "Using Docker-based syft..."
             docker run --rm \
               --user $(id -u):$(id -g) \
               -v /var/run/docker.sock:/var/run/docker.sock \
@@ -510,14 +529,24 @@ jobs:
               -o spdx-json=/output/sbom-java.json \
               -o cyclonedx-json=/output/sbom-java-cyclonedx.json \
               -o spdx-json=/tmp-output/sbom-java.json \
-              -o cyclonedx-json=/tmp-output/sbom-java-cyclonedx.json
+              -o cyclonedx-json=/tmp-output/sbom-java-cyclonedx.json || {
+              echo "❌ Syft scan failed"
+              exit 1
+            }
           fi
           
-          echo "✓ Java SBOM generated"
-          echo "  - Workspace: $WORKSPACE_DIR/sbom-java*.json"
-          echo "  - Host /tmp: /tmp/sbom-output/sbom-java*.json"
-          ls -lh $WORKSPACE_DIR/sbom-java*.json
-          ls -lh /tmp/sbom-output/sbom-java*.json
+          echo ""
+          echo "✓ Java SBOM generated successfully"
+          echo ""
+          echo "Workspace files:"
+          ls -lh "$WORKSPACE_DIR"/sbom-java*.json 2>/dev/null || echo "  No files in workspace"
+          echo ""
+          echo "Host /tmp files:"
+          ls -lh /tmp/sbom-output/sbom-java*.json 2>/dev/null || echo "  No files in /tmp"
+          echo ""
+          echo "File locations for upload testing:"
+          echo "  - /tmp/sbom-output/sbom-java.json"
+          echo "  - /tmp/sbom-output/sbom-java-cyclonedx.json"
 
       # Step 10: Generate SBOM for Python App
       - name: Generate SBOM for Python App
@@ -526,20 +555,39 @@ jobs:
           IMAGE_NAME="${{ secrets.GIT_REGISTRY }}/${REPO_LOWER}/load-test-app"
           
           echo "Generating SBOM for Python Load Test App..."
+          echo "Image: ${IMAGE_NAME}:latest"
           echo "Output will be saved to both workspace and /tmp for upload testing"
           
-          # Create /tmp directory if it doesn't exist
+          # Create output directories
           mkdir -p /tmp/sbom-output
+          mkdir -p "$WORKSPACE_DIR"
+          
+          # Check if image exists
+          if ! docker image inspect "${IMAGE_NAME}:latest" &> /dev/null; then
+            echo "⚠️  Warning: Image ${IMAGE_NAME}:latest not found locally"
+            echo "Attempting to pull image..."
+            docker pull "${IMAGE_NAME}:latest" || {
+              echo "❌ Failed to pull image. SBOM generation skipped."
+              exit 0
+            }
+          fi
+          
+          echo "Image found, generating SBOM..."
           
           if command -v syft &> /dev/null; then
             # Generate SBOM with syft installed on host
+            echo "Using native syft..."
             syft "${IMAGE_NAME}:latest" \
-              -o spdx-json=$WORKSPACE_DIR/sbom-python.json \
-              -o cyclonedx-json=$WORKSPACE_DIR/sbom-python-cyclonedx.json \
-              -o spdx-json=/tmp/sbom-output/sbom-python.json \
-              -o cyclonedx-json=/tmp/sbom-output/sbom-python-cyclonedx.json
+              -o spdx-json="$WORKSPACE_DIR/sbom-python.json" \
+              -o cyclonedx-json="$WORKSPACE_DIR/sbom-python-cyclonedx.json" \
+              -o spdx-json="/tmp/sbom-output/sbom-python.json" \
+              -o cyclonedx-json="/tmp/sbom-output/sbom-python-cyclonedx.json" || {
+              echo "❌ Syft scan failed"
+              exit 1
+            }
           else
             # Generate SBOM using Docker container
+            echo "Using Docker-based syft..."
             docker run --rm \
               --user $(id -u):$(id -g) \
               -v /var/run/docker.sock:/var/run/docker.sock \
@@ -551,14 +599,24 @@ jobs:
               -o spdx-json=/output/sbom-python.json \
               -o cyclonedx-json=/output/sbom-python-cyclonedx.json \
               -o spdx-json=/tmp-output/sbom-python.json \
-              -o cyclonedx-json=/tmp-output/sbom-python-cyclonedx.json
+              -o cyclonedx-json=/tmp-output/sbom-python-cyclonedx.json || {
+              echo "❌ Syft scan failed"
+              exit 1
+            }
           fi
           
-          echo "✓ Python SBOM generated"
-          echo "  - Workspace: $WORKSPACE_DIR/sbom-python*.json"
-          echo "  - Host /tmp: /tmp/sbom-output/sbom-python*.json"
-          ls -lh $WORKSPACE_DIR/sbom-python*.json
-          ls -lh /tmp/sbom-output/sbom-python*.json
+          echo ""
+          echo "✓ Python SBOM generated successfully"
+          echo ""
+          echo "Workspace files:"
+          ls -lh "$WORKSPACE_DIR"/sbom-python*.json 2>/dev/null || echo "  No files in workspace"
+          echo ""
+          echo "Host /tmp files:"
+          ls -lh /tmp/sbom-output/sbom-python*.json 2>/dev/null || echo "  No files in /tmp"
+          echo ""
+          echo "File locations for upload testing:"
+          echo "  - /tmp/sbom-output/sbom-python.json"
+          echo "  - /tmp/sbom-output/sbom-python-cyclonedx.json"
 
       # Step 9: Upload SBOM to Concert (Optional)
       - name: Upload SBOM to Concert
